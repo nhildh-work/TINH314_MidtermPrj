@@ -1,0 +1,172 @@
+import { useState } from "react";
+import { useApp } from "../context";
+import SafePassLogo from "./Logo";
+
+export default function Navbar() {
+  const { role, setRole, cartCount, nav, isLoggedIn, setIsLoggedIn, setAuthModal, currentProfile, currentUser, lang, setLang, t, registeredUsers, setShowUsersModal } = useApp();
+  const [search, setSearch] = useState("");
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
+  const displayName = currentProfile?.full_name || currentUser?.email || "User";
+  const userInitials = displayName.slice(0, 2).toUpperCase();
+
+  return (
+    <header className="sp-navbar sticky top-0 z-50">
+      <div className="max-w-[1680px] mx-auto px-5 lg:px-8 h-[72px] flex items-center gap-4">
+        {/* Logo */}
+        <button onClick={() => nav("marketplace")} className="shrink-0">
+          <SafePassLogo size={38} showText />
+        </button>
+
+        {/* Search */}
+        <div className="flex-1 max-w-2xl relative">
+          <span
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
+            style={{ color: "#4b5563" }}
+          >
+            🔍
+          </span>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder={t.search}
+            className="sp-search-input"
+          />
+        </div>
+
+        {/* Role Toggle */}
+        <div className="sp-role-toggle">
+          <button
+            className={`sp-role-btn ${role === "buyer" ? "active" : ""}`}
+            onClick={() => { setRole("buyer"); nav("marketplace"); }}
+          >
+            {t.buyTickets}
+          </button>
+          <button
+            className={`sp-role-btn ${role === "seller" ? "active" : ""}`}
+            onClick={() => { setRole("seller"); nav("seller-dash"); }}
+          >
+            {t.sellTickets}
+          </button>
+        </div>
+
+        {/* Lang toggle */}
+        <button
+          onClick={() => setLang(lang === "vi" ? "en" : "vi")}
+          title={lang === "vi" ? "Switch to English" : "Chuyển sang Tiếng Việt"}
+          style={{
+            padding: "0.38rem 0.7rem",
+            borderRadius: "10px",
+            background: "#13132a",
+            border: "1px solid rgba(255,255,255,0.07)",
+            color: "#9ca3af",
+            fontFamily: "'Bricolage Grotesque', sans-serif",
+            fontSize: "0.78rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            flexShrink: 0,
+            transition: "all 0.15s",
+            letterSpacing: "0.03em",
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.color = "#fff";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.18)";
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.color = "#9ca3af";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.07)";
+          }}
+        >
+          {lang === "vi" ? "🇺🇸 EN" : "🇻🇳 VI"}
+        </button>
+
+        {/* Quick button to view registered users */}
+        <button
+          onClick={() => setShowUsersModal(true)}
+          title="Xem danh sách người đăng ký"
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-display font-700 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/25 transition-all"
+        >
+          <span>👥</span>
+          <span>Thành viên</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/30 text-[10px] text-white">
+            {registeredUsers.length}
+          </span>
+        </button>
+
+        {/* Cart */}
+        <button className="sp-cart-btn" onClick={() => { if (isLoggedIn) nav("my-tickets"); else setAuthModal("login"); }}>
+          <span>🛍️</span>
+          {cartCount > 0 && <span className="sp-cart-badge">{cartCount}</span>}
+        </button>
+
+        {/* Auth */}
+        {isLoggedIn ? (
+          <div className="relative shrink-0">
+            <button onClick={() => setShowUserMenu(v => !v)} className="sp-avatar-btn ring-2 ring-purple-500/30">
+              {currentProfile?.avatar_url ? (
+                <img src={currentProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover rounded-full" />
+              ) : (
+                userInitials
+              )}
+            </button>
+            {showUserMenu && (
+              <div
+                className="absolute right-0 top-12 rounded-2xl overflow-hidden z-50 py-1"
+                style={{ background: "#0d0d1e", border: "1px solid rgba(255,255,255,0.1)", minWidth: 200, boxShadow: "0 16px 48px rgba(0,0,0,0.7)" }}
+              >
+                <div className="px-4 py-2.5 border-b border-white/5">
+                  <p className="text-xs font-700 text-white truncate">{displayName}</p>
+                  <p className="text-[11px] text-gray-400 truncate">{currentUser?.email || currentProfile?.email}</p>
+                </div>
+
+                <button
+                  onClick={() => { setShowUserMenu(false); nav("profile"); }}
+                  className="w-full text-left px-4 py-2.5 text-xs font-display font-600 text-white hover:bg-white/5 transition-colors flex items-center gap-2"
+                >
+                  <span>👤</span>
+                  <span>{t.myAccount}</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowUserMenu(false); setShowUsersModal(true); }}
+                  className="w-full text-left px-4 py-2.5 text-xs font-display font-600 text-purple-300 hover:bg-white/5 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-2">
+                    <span>👥</span>
+                    <span>Danh sách người đăng ký</span>
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-200">
+                    {registeredUsers.length}
+                  </span>
+                </button>
+
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
+
+                <button
+                  onClick={() => { setShowUserMenu(false); setIsLoggedIn(false); nav("marketplace"); }}
+                  className="w-full text-left px-4 py-2.5 text-xs font-display font-600 transition-colors flex items-center gap-2"
+                  style={{ color: "#F87171" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(248,113,113,0.08)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                >
+                  <span>🚪</span>
+                  <span>{t.logout}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => setAuthModal("login")} className="sp-btn-ghost text-sm px-4 py-2 hidden sm:flex">
+              {t.login}
+            </button>
+            <button onClick={() => setAuthModal("register")} className="sp-btn-primary text-sm px-4 py-2">
+              {t.register}
+            </button>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}

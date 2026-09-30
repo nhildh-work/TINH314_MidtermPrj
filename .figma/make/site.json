@@ -1,0 +1,10 @@
+{
+  "description": "Streamline ticket purchasing and selling with an intuitive interface designed for event organizers and attendees, enhancing user experience and accessibility.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
