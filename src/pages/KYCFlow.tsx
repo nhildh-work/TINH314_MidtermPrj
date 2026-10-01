@@ -12,7 +12,7 @@ interface CccdExtractedData {
 }
 
 export default function KYCFlow() {
-  const { setKycStatus, nav, currentProfile, refreshProfile } = useApp();
+  const { setKycStatus, nav, refreshProfile } = useApp();
   const [step, setStep] = useState<KycStep>(1);
 
   // Files & Previews
@@ -229,7 +229,7 @@ export default function KYCFlow() {
       "CONG", "HOA", "XA", "HOI", "CHU", "NGHIA", "VIET", "NAM",
       "DOC", "LAP", "TU", "DO", "HANH", "PHUC",
       "CAN", "CUOC", "CUC", "CNG", "DAN", "CITIZEN", "IDENTITY", "CARD",
-      "SO", "NO", "SEX", "DATE", "BIRTH"
+      "SO", "NO", "SEX", "DATE", "BIRTH", "QUOC", "TICH", "QUE", "QUAN", "NOI", "THUONG", "TRU"
     ];
 
     const words = noAccent.split(/\s+/);
@@ -242,7 +242,7 @@ export default function KYCFlow() {
     return matchCount >= 1;
   };
 
-  // 1. KIỂM TRA & QUÉT AI TRÊN HÌNH ĐÃ ĐƯỢC CĂN CHỈNH
+  // 1. QUÉT OCR THỰC TẾ 100% TỪ ẢNH CCCD (KHÔNG FALLBACK TÊN TÀI KHOẢN)
   const handleValidateAndScanCccd = async () => {
     if (!frontFile || !frontPreview) return;
     setProcessing(true);
@@ -268,12 +268,12 @@ export default function KYCFlow() {
       const detection = await faceapi.detectSingleFace(cccdImg).withFaceLandmarks().withFaceDescriptor();
 
       if (!detection) {
-        setStep1Error("Không tìm thấy khuôn mặt rõ ràng! Dùng chuột kéo di chuyển & chỉnh thanh Zoom để đưa ảnh mặt vào giữa khung rồi thử lại.");
+        setStep1Error("Không tìm thấy khuôn mặt rõ ràng trên CCCD! Dùng chuột kéo di chuyển & chỉnh thanh Zoom để đưa ảnh mặt vào giữa khung rồi thử lại.");
         setProcessing(false);
         return;
       }
 
-      // Quét OCR bằng Tesseract
+      // Quét OCR bằng Tesseract.js
       const { data: { text } } = await Tesseract.recognize(processedFrontSrc, "vie");
       
       const idMatch = text.match(/\b\d{12}\b/);
@@ -320,22 +320,30 @@ export default function KYCFlow() {
         }
       }
 
+      // ❌ TUYỆT ĐỐI KHÔNG FALLBACK. NẾU KHÔNG ĐỌC ĐƯỢC TÊN -> BÁO LỖI DỪNG LẠI.
       if (!detectedName) {
-        // Fallback tên rỗng nếu không đọc được, bắt người dùng phải quét lại
-        detectedName = currentProfile?.full_name?.toUpperCase() || "";
+        setStep1Error("Không thể đọc được Họ và tên từ ảnh CCCD. Vui lòng căn chỉnh lại vị trí ảnh phóng to vùng tên và thử lại.");
+        setProcessing(false);
+        return;
+      }
+
+      if (!detectedId) {
+        setStep1Error("Không tìm thấy số CCCD (12 chữ số). Vui lòng căn chỉnh lại khung ảnh mặt trước.");
+        setProcessing(false);
+        return;
       }
 
       setCccdDescriptor(detection.descriptor);
       setOcrData({
         fullName: detectedName,
-        idNumber: detectedId || "Chưa nhận diện rõ số",
+        idNumber: detectedId,
       });
 
       setProcessing(false);
       setStep(2);
     } catch (err) {
       console.error(err);
-      setStep1Error("Lỗi xử lý ảnh. Vui lòng kiểm tra lại ảnh đầu vào.");
+      setStep1Error("Lỗi xử lý ảnh CCCD. Vui lòng thử lại.");
       setProcessing(false);
     }
   };
@@ -379,10 +387,9 @@ export default function KYCFlow() {
     }
   };
 
-  // 3. HOÀN TẤT & LƯU SUPABASE (Fix lỗi invalid input syntax UUID)
+  // 3. HOÀN TẤT & LƯU SUPABASE (UUID chuẩn)
   const handleCompleteKYC = async () => {
     try {
-      // Bắt buộc lấy ID chuẩn UUID thực tế từ Supabase Auth thay vì Context (chống lưu ID fake sp-usr)
       const { data: { user }, error: authError } = await supabase.auth.getUser();
 
       if (authError || !user?.id) {
@@ -398,7 +405,7 @@ export default function KYCFlow() {
           full_name: ocrData.fullName,
           cccd_number: ocrData.idNumber,
         })
-        .eq("id", user.id); // Trỏ thẳng ID thật
+        .eq("id", user.id);
 
       if (dbError) throw dbError;
       
@@ -716,7 +723,6 @@ export default function KYCFlow() {
             )}
           </div>
 
-          {/* ĐÃ BỎ % MATCH */}
           {matchingStatus === "matched" && (
             <div className="p-4 rounded-xl bg-lime-500/10 border border-lime-500/30 text-lime-400 text-xs mb-5 font-bold text-center">
               ✓ Khuôn mặt trùng khớp chính chủ!
