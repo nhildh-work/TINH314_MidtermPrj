@@ -44,7 +44,7 @@ export default function Profile() {
   return (
     <div className="max-w-3xl mx-auto px-5 lg:px-8 py-8">
       <button onClick={() => nav("marketplace")} className="sp-btn-ghost text-sm px-3 py-2 mb-5 flex items-center gap-1.5">
-        ← {t.backToMarket2}
+        {t.backToMarket2}
       </button>
 
       {/* Profile Header */}

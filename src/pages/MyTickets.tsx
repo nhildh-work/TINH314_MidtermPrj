@@ -1,44 +1,51 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../context";
-import { MY_TICKETS, type MyTicket } from "../data";
+import type { MyTicket } from "../data";
 import { supabase } from "../lib/supabaseClient";
+import TicketPassModal from "../modals/TicketPassModal";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 const STATUS_CFG = {
-  locked: { label: "LOCKED", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
-  available: { label: "AVAILABLE", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
-  completed: { label: "COMPLETED", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
-  dispute: { label: "DISPUTE", color: "#F87171", bg: "rgba(248,113,113,0.1)" },
+  locked: { label: "🎟️ SẴN SÀNG QUÉT CỔNG", color: "#A78BFA", bg: "rgba(167,139,250,0.14)" },
+  available: { label: "🟢 HỢP LỆ", color: "#A3E635", bg: "rgba(163,230,53,0.14)" },
+  completed: { label: "✅ ĐÃ VÀO CỔNG", color: "#34D399", bg: "rgba(52,211,153,0.14)" },
+  dispute: { label: "🚨 TRANH CHẤP CỔNG", color: "#F87171", bg: "rgba(248,113,113,0.14)" },
 } as const;
 
-function QRPlaceholder({ blurred }: { blurred: boolean }) {
-  const cells = Array.from({ length: 25 }, (_, i) => {
-    const row = Math.floor(i / 5);
-    const col = i % 5;
-    const isCorner = (row < 2 && col < 2) || (row < 2 && col > 2) || (row > 2 && col < 2);
-    const filled = isCorner || Math.random() > 0.45;
-    return filled;
-  });
-
+function MiniQR({ ticketId, onOpen }: { ticketId: number; onOpen: () => void }) {
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=4&data=SAFEPASS-GATE-${ticketId}`;
   return (
     <div
-      className="relative w-20 h-20 rounded-xl p-2 flex-shrink-0"
-      style={{ background: "#fff", filter: blurred ? "blur(5px)" : "none" }}
+      onClick={onOpen}
+      title="Bấm để mở vé quét mã to toàn màn hình"
+      className="relative w-16 h-16 rounded-xl p-1 bg-white flex-shrink-0 cursor-pointer hover:scale-105 transition-transform shadow-md group flex items-center justify-center overflow-hidden"
     >
-      <div className="grid gap-0.5" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-        {cells.map((filled, i) => (
-          <div key={i} className="rounded-sm" style={{ aspectRatio: "1", background: filled ? "#111" : "transparent" }} />
-        ))}
+      <img src={qrUrl} alt="Mini QR" className="w-full h-full object-contain" />
+      <div className="absolute inset-0 bg-purple-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-xl">
+        <span className="text-white text-[10px] font-display font-800">MỞ QR</span>
       </div>
     </div>
   );
 }
 
 export default function MyTickets() {
-  const { openDispute, nav, isLoggedIn, setAuthModal, reportedTicketIds, addReportedTicket, currentUser, t, purchasedTickets: contextPurchasedTickets } = useApp();
+  const {
+    openDispute,
+    nav,
+    isLoggedIn,
+    setAuthModal,
+    reportedTicketIds,
+    addReportedTicket,
+    currentUser,
+    currentProfile,
+    t,
+    purchasedTickets: contextPurchasedTickets,
+  } = useApp();
+
   const [checkedIn, setCheckedIn] = useState<Set<number>>(new Set<number>());
   const [purchasedTickets, setPurchasedTickets] = useState<MyTicket[]>([]);
+  const [selectedTicketForPass, setSelectedTicketForPass] = useState<MyTicket | null>(null);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -90,6 +97,9 @@ export default function MyTickets() {
   // Chỉ lấy vé người dùng hiện tại thực sự đã mua (qua Supabase hoặc trong phiên làm việc)
   const allTickets = [...contextPurchasedTickets, ...purchasedTickets];
 
+  const buyerName = currentProfile?.full_name || (currentUser?.user_metadata as any)?.full_name || currentUser?.email || "Khách hàng SafePass";
+  const buyerEmail = currentProfile?.email || currentUser?.email || "";
+
   if (!isLoggedIn) {
     return (
       <div className="max-w-md mx-auto px-4 py-24 text-center">
@@ -123,74 +133,94 @@ export default function MyTickets() {
           <button onClick={() => nav("marketplace")} className="sp-btn-primary mt-4 px-6 py-2.5">{t.goShop}</button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {allTickets.map(ticket => {
             const effectiveStatus = checkedIn.has(ticket.id) ? "completed" : reportedTicketIds.includes(ticket.id) ? "dispute" : ticket.status;
-            const cfg = STATUS_CFG[effectiveStatus];
+            const cfg = STATUS_CFG[effectiveStatus] || STATUS_CFG.locked;
             const isLocked = effectiveStatus === "locked";
 
             return (
-              <div key={ticket.id} className="sp-card overflow-hidden">
+              <div key={ticket.id} className="sp-card overflow-hidden transition-all duration-200 hover:border-purple-500/30">
                 {/* Top image strip */}
-                <div className="relative h-28 overflow-hidden">
+                <div className="relative h-32 overflow-hidden">
                   <img src={ticket.eventImage} alt={ticket.eventTitle} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0" style={{ background: "linear-gradient(to right, rgba(13,13,30,0.95) 0%, rgba(13,13,30,0.4) 60%, transparent 100%)" }} />
+                  <div className="absolute inset-0" style={{ background: "linear-gradient(to right, rgba(13,13,30,0.96) 0%, rgba(13,13,30,0.6) 65%, transparent 100%)" }} />
                   <div className="absolute inset-0 flex items-center px-4 gap-4">
-                    {/* QR */}
-                    <div className="relative shrink-0">
-                      <QRPlaceholder blurred={isLocked} />
-                      {isLocked && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-xl" style={{ background: "rgba(0,0,0,0.3)" }}>
-                          <span className="text-2xl">🔒</span>
-                        </div>
-                      )}
-                    </div>
+                    {/* Mini QR that opens full Gate Pass */}
+                    <MiniQR ticketId={ticket.id} onOpen={() => setSelectedTicketForPass(ticket)} />
+
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-display font-700 text-white text-sm leading-snug mb-1 line-clamp-2">{ticket.eventTitle}</h3>
-                      <span
-                        className="text-xs font-display font-700 px-2 py-0.5 rounded-full"
-                        style={{ color: cfg.color, background: cfg.bg }}
-                      >
-                        {cfg.label}
-                      </span>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span
+                          className="text-[10px] font-display font-800 px-2 py-0.5 rounded-full"
+                          style={{ color: cfg.color, background: cfg.bg }}
+                        >
+                          {cfg.label}
+                        </span>
+                        <span className="text-[10px] text-gray-400 font-mono">
+                          Mã vé: SP-{ticket.id.toString().padStart(6, "0")}
+                        </span>
+                      </div>
+                      <h3 className="font-display font-700 text-white text-base leading-snug line-clamp-1 mb-1">{ticket.eventTitle}</h3>
+                      <p className="text-xs text-gray-300 flex items-center gap-2">
+                        <span>📅 {ticket.date}</span>
+                        <span>•</span>
+                        <span className="truncate">📍 {ticket.venue}</span>
+                      </p>
                     </div>
                   </div>
                 </div>
 
                 <div className="p-4">
-                  {/* Details */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
+                  {/* Details Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 bg-white/[0.02] p-3 rounded-xl border border-white/5">
                     {[
                       { icon: "🎫", label: t.tierLabel2, val: ticket.tier },
                       { icon: "💰", label: t.pricePaid, val: fmt(ticket.price) },
                       { icon: "📅", label: t.timeLabel, val: ticket.date },
                       { icon: "📍", label: t.venueLabel, val: ticket.venue },
                     ].map(item => (
-                      <div key={item.label} className="flex gap-2 items-start">
-                        <span className="text-sm mt-0.5 shrink-0">{item.icon}</span>
-                        <div className="min-w-0">
-                          <p className="sp-filter-label">{item.label}</p>
-                          <p className="text-xs font-500 text-white mt-0.5 truncate">{item.val}</p>
-                        </div>
+                      <div key={item.label} className="min-w-0">
+                        <p className="sp-filter-label text-[10px] flex items-center gap-1">
+                          <span>{item.icon}</span>
+                          <span>{item.label}</span>
+                        </p>
+                        <p className="text-xs font-600 text-white mt-0.5 truncate">{item.val}</p>
                       </div>
                     ))}
                   </div>
 
-                  {/* Actions for LOCKED tickets */}
+                  {/* ── PRIMARY ACTION: OPEN TICKET PASS MODAL (QR & PDF) ── */}
+                  <button
+                    onClick={() => setSelectedTicketForPass(ticket)}
+                    className="w-full py-3 px-4 rounded-xl font-display font-800 text-sm text-white transition-all shadow-lg flex items-center justify-center gap-2 mb-3"
+                    style={{
+                      background: "linear-gradient(135deg, #7C3AED 0%, #9333EA 50%, #4F46E5 100%)",
+                      boxShadow: "0 8px 24px -4px rgba(124, 58, 237, 0.45)",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                    }}
+                  >
+                    <span className="text-base">🎟️</span>
+                    <span>Xem Vé Điện Tử & Mã Quét Cổng (QR / PDF)</span>
+                  </button>
+
+                  {/* Actions for LOCKED (Pending Gate Check-in) tickets */}
                   {isLocked && effectiveStatus !== "dispute" && (
                     <div className="space-y-2">
-                      <p className="text-xs text-center pb-2" style={{ color: "#6b7280" }}>{t.checkinHint}</p>
+                      <p className="text-xs text-center pb-1 text-gray-400">
+                        {t.checkinHint}
+                      </p>
                       <button
                         onClick={() => setCheckedIn(prev => new Set([...prev, ticket.id]))}
-                        className="w-full py-3 rounded-xl font-display font-700 text-sm text-white transition-all hover:opacity-90"
+                        className="w-full py-2.5 rounded-xl font-display font-700 text-xs text-white transition-all hover:opacity-95 flex items-center justify-center gap-1.5"
                         style={{ background: "linear-gradient(135deg,#065F46,#059669)" }}
                       >
                         {t.checkinBtn}
                       </button>
                       <button
                         onClick={() => { addReportedTicket(ticket.id); openDispute(ticket); }}
-                        className="w-full py-2.5 rounded-xl font-display font-700 text-sm transition-all"
+                        className="w-full py-2 rounded-xl font-display font-700 text-xs transition-all flex items-center justify-center gap-1.5"
                         style={{ color: "#F87171", border: "1px solid rgba(248,113,113,0.25)", background: "transparent" }}
                         onMouseEnter={e => (e.currentTarget.style.background = "rgba(248,113,113,0.07)")}
                         onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
@@ -203,12 +233,18 @@ export default function MyTickets() {
                   {effectiveStatus === "dispute" && (
                     <div className="text-center p-3 rounded-xl" style={{ background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.2)" }}>
                       <p className="text-xs font-display font-700" style={{ color: "#F87171" }}>{t.reportedStatus}</p>
+                      <button
+                        onClick={() => nav("dispute-center")}
+                        className="mt-2 text-xs font-display font-700 text-red-400 underline hover:text-red-300"
+                      >
+                        Xem tiến độ xử lý tại Trung tâm tranh chấp →
+                      </button>
                     </div>
                   )}
 
                   {effectiveStatus === "completed" && (
-                    <div className="text-center p-3 rounded-xl" style={{ background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.14)" }}>
-                      <p className="text-xs" style={{ color: "#60A5FA" }}>{t.completedMsg}</p>
+                    <div className="text-center p-3 rounded-xl" style={{ background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.2)" }}>
+                      <p className="text-xs font-display font-700" style={{ color: "#34D399" }}>{t.completedMsg}</p>
                     </div>
                   )}
                 </div>
@@ -217,6 +253,24 @@ export default function MyTickets() {
           })}
         </div>
       )}
+
+      {/* ── TICKET PASS FULL-SCREEN MODAL FOR GATE ENTRY ── */}
+      <TicketPassModal
+        ticket={selectedTicketForPass}
+        isOpen={!!selectedTicketForPass}
+        onClose={() => setSelectedTicketForPass(null)}
+        buyerName={buyerName}
+        buyerEmail={buyerEmail}
+        isCheckedIn={selectedTicketForPass ? checkedIn.has(selectedTicketForPass.id) : false}
+        isReported={selectedTicketForPass ? reportedTicketIds.includes(selectedTicketForPass.id) : false}
+        onConfirmCheckin={(id) => {
+          setCheckedIn(prev => new Set([...prev, id]));
+        }}
+        onReportIssue={(t) => {
+          addReportedTicket(t.id);
+          openDispute(t);
+        }}
+      />
     </div>
   );
 }

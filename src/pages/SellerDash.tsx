@@ -177,12 +177,7 @@ export default function SellerDash() {
         <button onClick={() => nav("kyc")} className="sp-btn-primary px-8 py-3 font-display font-700">
           {t.kycStart}
         </button>
-        <div className="sp-testmode max-w-xs mx-auto">
-          <p className="text-xs mb-2" style={{ color: "#4b5563", fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600 }}>🧪 Chế độ test</p>
-          <button className="sp-testmode-btn" onClick={() => setKycStatus("approved")}>
-            Giả sử đã xác minh → mở khóa trang bán vé
-          </button>
-        </div>
+
       </div>
     );
   }

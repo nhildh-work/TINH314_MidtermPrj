@@ -261,3 +261,41 @@ textarea.sp-input { resize: vertical; }
   text-align: center;
 }
 .sp-testmode-btn:hover { background: rgba(251,191,36,0.06); color: #FBBF24; border-color: rgba(251,191,36,0.45); }
+
+/* ── Gate Pass / E-Ticket Keyframes & Print ── */
+@keyframes spLaserScan {
+  0% { top: 4%; opacity: 0.85; }
+  50% { opacity: 1; }
+  100% { top: 94%; opacity: 0.85; }
+}
+
+@keyframes spFadeScale {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #printable-ticket, #printable-ticket * {
+    visibility: visible !important;
+  }
+  #printable-ticket {
+    position: absolute !important;
+    left: 50% !important;
+    top: 50px !important;
+    transform: translateX(-50%) !important;
+    width: 440px !important;
+    max-width: 100% !important;
+    background: #0c0d1c !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    border: 1px solid #4c1d95 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
