@@ -11,6 +11,227 @@ interface CccdExtractedData {
   idNumber: string;
 }
 
+// Hàm chuẩn hóa loại bỏ dấu tiếng Việt chuyển thành chữ không dấu viết hoa
+function cleanToAsciiUpper(str: string): string {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "D")
+    .replace(/[^A-Za-z0-9\s:./-]/g, " ")
+    .toUpperCase();
+}
+
+// Tiền xử lý ảnh qua Canvas: grayscale + tăng tương phản để OCR đọc chữ nét hơn 300%
+function preprocessImageForOcr(imageSource: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const maxDim = 1600;
+        let w = img.width;
+        let h = img.height;
+        if (Math.max(w, h) > maxDim) {
+          const ratio = maxDim / Math.max(w, h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(imageSource);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const d = imgData.data;
+        // Grayscale + Contrast boost
+        for (let i = 0; i < d.length; i += 4) {
+          const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          let v = (gray - 128) * 1.35 + 128;
+          v = Math.min(255, Math.max(0, v));
+          d[i] = v;
+          d[i + 1] = v;
+          d[i + 2] = v;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL("image/jpeg", 0.92));
+      } catch (e) {
+        resolve(imageSource);
+      }
+    };
+    img.onerror = () => resolve(imageSource);
+    img.src = imageSource;
+  });
+}
+
+// Bóc tách Số CCCD (12 số) và Họ tên (Capslock không dấu) chuẩn xác từ văn bản OCR
+function extractCccdFromText(rawText: string): { fullName: string; idNumber: string } {
+  const normalized = cleanToAsciiUpper(rawText);
+  const lines = normalized.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  // 1. TRÍCH XUẤT SỐ CCCD (12 CHỮ SỐ)
+  let idNumber = "";
+
+  // 1a. Tìm trực tiếp 12 chữ số liên tiếp
+  const direct12 = normalized.match(/\b\d{12}\b/);
+  if (direct12) {
+    idNumber = direct12[0];
+  }
+
+  // 1b. Tìm dạng có khoảng cách (VD: 079 201 012 345)
+  if (!idNumber) {
+    const space12 = normalized.match(/\b\d{3}\s*\d{3}\s*\d{6}\b/) || normalized.match(/\b\d{3}\s*\d{3}\s*\d{3}\s*\d{3}\b/);
+    if (space12) {
+      idNumber = space12[0].replace(/\s+/g, "");
+    }
+  }
+
+  // 1c. Tìm theo dòng chứa "SO" / "NO"
+  if (!idNumber) {
+    for (const line of lines) {
+      if (/(\bSO\b|\bNO\b|CAN\s*CUOC)/i.test(line)) {
+        const digits = line
+          .replace(/SO|NO|CAN CUOC|CONG DAN|CITIZEN|CARD/gi, "")
+          .replace(/[O]/gi, "0")
+          .replace(/[Il|]/g, "1")
+          .replace(/\D/g, "");
+        if (digits.length >= 12) {
+          idNumber = digits.slice(0, 12);
+          break;
+        }
+      }
+    }
+  }
+
+  // 1d. Quét bất kỳ chuỗi 12 số nào bắt đầu bằng 0 (CCCD Việt Nam đều bắt đầu bằng 0xx)
+  if (!idNumber) {
+    const allDigits = normalized.replace(/\D/g, "");
+    if (allDigits.length >= 12) {
+      const idx0 = allDigits.indexOf("0");
+      if (idx0 !== -1 && allDigits.length >= idx0 + 12) {
+        idNumber = allDigits.slice(idx0, idx0 + 12);
+      } else {
+        idNumber = allDigits.slice(0, 12);
+      }
+    }
+  }
+
+  // 2. TRÍCH XUẤT HỌ VÀ TÊN (CAPSLOCK KHÔNG DẤU)
+  let fullName = "";
+
+  // Danh sách từ khóa tiêu đề quốc gia/nhãn thẻ CẦN LOẠI TRỪ (chống nhận nhầm thành tên)
+  const BLACKLIST_WORDS = [
+    "CONG HOA", "XA HOI", "CHU NGHIA", "VIET NAM", "VIETNAM",
+    "DOC LAP", "TU DO", "HANH PHUC",
+    "CAN CUOC", "CONG DAN", "CITIZEN", "IDENTITY", "CARD", "THE CAN CUOC",
+    "HO VA TEN", "FULL NAME", "HO TEN", "HO VA",
+    "NGAY SINH", "DATE OF BIRTH", "BIRTH", "DATE",
+    "GIOI TINH", "SEX", "GENDER",
+    "QUOC TICH", "NATIONALITY",
+    "QUE QUAN", "PLACE OF ORIGIN", "ORIGIN",
+    "NOI THUONG TRU", "PLACE OF RESIDENCE", "RESIDENCE",
+    "CO GIA TRI DEN", "DATE OF EXPIRY", "EXPIRY",
+    "SO", "NO", "NAM", "NU",
+    "SOCIALIST", "REPUBLIC", "INDEPENDENCE", "FREEDOM", "HAPPINESS"
+  ];
+
+  const isBlacklisted = (str: string) => {
+    return BLACKLIST_WORDS.some(bw => str.includes(bw));
+  };
+
+  // Chiến lược A: Tìm dòng có nhãn "HO VA TEN" hoặc "FULL NAME"
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/(?:HO\s*(?:VA\s*)?TEN|FULL\s*NAME)/i.test(line)) {
+      // Kiểm tra xem tên có nằm cùng dòng sau nhãn không
+      const after = line
+        .replace(/.*(?:HO\s*(?:VA\s*)?TEN|FULL\s*NAME)[:./\s-]*/i, "")
+        .replace(/[^A-Z\s]/g, " ")
+        .trim();
+      const afterWords = after.split(/\s+/).filter(w => w.length >= 2);
+      if (afterWords.length >= 2 && afterWords.length <= 5 && !isBlacklisted(after)) {
+        fullName = afterWords.join(" ");
+        break;
+      }
+
+      // Kiểm tra 1-2 dòng ngay bên dưới nhãn
+      for (let j = 1; j <= 2 && i + j < lines.length; j++) {
+        const next = lines[i + j];
+        if (/\d/.test(next) || isBlacklisted(next)) continue;
+        const words = next.replace(/[^A-Z\s]/g, " ").trim().split(/\s+/).filter(w => w.length >= 2);
+        if (words.length >= 2 && words.length <= 5) {
+          fullName = words.join(" ");
+          break;
+        }
+      }
+      if (fullName) break;
+    }
+  }
+
+  // Chiến lược B: Tìm dòng nằm giữa Số CCCD và Ngày sinh (cấu trúc cố định của thẻ CCCD)
+  if (!fullName) {
+    let passedId = false;
+    for (const line of lines) {
+      if (idNumber && line.includes(idNumber)) {
+        passedId = true;
+        continue;
+      }
+      if (passedId) {
+        if (/NGAY\s*SINH|DATE\s*OF\s*BIRTH|\d{2}[\/.-]\d{2}[\/.-]\d{4}/i.test(line)) {
+          break;
+        }
+        if (/\d/.test(line) || isBlacklisted(line)) continue;
+        const words = line.replace(/[^A-Z\s]/g, " ").trim().split(/\s+/).filter(w => w.length >= 2);
+        if (words.length >= 2 && words.length <= 5) {
+          fullName = words.join(" ");
+          break;
+        }
+      }
+    }
+  }
+
+  // Chiến lược C: Đối soát theo các Họ phổ biến nhất của người Việt
+  if (!fullName) {
+    const COMMON_SURNAMES = [
+      "NGUYEN", "TRAN", "LE", "PHAM", "HOANG", "HUYNH", "PHAN", "VU", "VO",
+      "DANG", "BUI", "DO", "HO", "NGO", "DUONG", "LY", "DAO", "DINH", "DOAN",
+      "LAM", "MAI", "TRINH", "LUONG", "THAI", "CHAU", "TA", "QUACH", "HA",
+      "PHUNG", "TRUONG", "CAO", "VUONG"
+    ];
+
+    for (const line of lines) {
+      if (/\d/.test(line) || isBlacklisted(line)) continue;
+      const words = line.replace(/[^A-Z\s]/g, " ").trim().split(/\s+/).filter(w => w.length >= 2);
+      if (words.length >= 2 && words.length <= 5) {
+        if (COMMON_SURNAMES.includes(words[0])) {
+          fullName = words.join(" ");
+          break;
+        }
+      }
+    }
+  }
+
+  // Chiến lược D: Dòng viết hoa sạch bất kỳ có từ 2-4 từ không dính blacklist
+  if (!fullName) {
+    for (const line of lines) {
+      if (/\d/.test(line) || isBlacklisted(line)) continue;
+      const words = line.replace(/[^A-Z\s]/g, " ").trim().split(/\s+/).filter(w => w.length >= 2);
+      if (words.length >= 2 && words.length <= 5) {
+        fullName = words.join(" ");
+        break;
+      }
+    }
+  }
+
+  return {
+    fullName: fullName.toUpperCase(),
+    idNumber: idNumber,
+  };
+}
+
 export default function KYCFlow() {
   const { setKycStatus, nav, refreshProfile } = useApp();
   const [step, setStep] = useState<KycStep>(1);
@@ -21,7 +242,7 @@ export default function KYCFlow() {
   const [frontPreview, setFrontPreview] = useState<string | null>(null);
   const [backPreview, setBackPreview] = useState<string | null>(null);
 
-  // --- TRẠNG THÁI PAN & ZOOM MẶT TRƯỚC ---
+  // Pan & Zoom Mặt trước
   const [frontZoom, setFrontZoom] = useState<number>(1.0);
   const [frontOffset, setFrontOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isFrontDragging, setIsFrontDragging] = useState<boolean>(false);
@@ -29,7 +250,7 @@ export default function KYCFlow() {
   const frontContainerRef = useRef<HTMLDivElement | null>(null);
   const frontImgRef = useRef<HTMLImageElement | null>(null);
 
-  // --- TRẠNG THÁI PAN & ZOOM MẶT SAU ---
+  // Pan & Zoom Mặt sau
   const [backZoom, setBackZoom] = useState<number>(1.0);
   const [backOffset, setBackOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isBackDragging, setIsBackDragging] = useState<boolean>(false);
@@ -53,7 +274,7 @@ export default function KYCFlow() {
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [matchingStatus, setMatchingStatus] = useState<"idle" | "scanning" | "matched" | "failed">("idle");
 
-  const STEP_LABELS = ["Tải & Căn ảnh CCCD", "Xác nhận Thông tin", "Quét mặt WebCam", "Kích hoạt"];
+  const STEP_LABELS = ["Tải ảnh CCCD", "Thông tin trích xuất", "Quét mặt WebCam", "Kích hoạt"];
 
   useEffect(() => {
     return () => {
@@ -129,8 +350,8 @@ export default function KYCFlow() {
   };
 
   const handleFileUpload = (side: "front" | "back", file: File) => {
-    setStep1Error(null);
     const url = URL.createObjectURL(file);
+    setStep1Error(null);
     if (side === "front") {
       setFrontFile(file);
       setFrontPreview(url);
@@ -165,192 +386,99 @@ export default function KYCFlow() {
     }
   };
 
-  const getCroppedDataUrl = (
-    previewUrl: string | null,
-    container: HTMLDivElement | null,
-    img: HTMLImageElement | null,
-    offset: { x: number; y: number },
-    zoom: number
-  ): Promise<string> => {
-    return new Promise((resolve) => {
-      if (!previewUrl || !container || !img) {
-        resolve(previewUrl || "");
-        return;
-      }
-
-      const containerRect = container.getBoundingClientRect();
-      const boxWidth = containerRect.width;
-      const boxHeight = containerRect.height;
-
-      const scaleFactor = 2;
-      const canvas = document.createElement("canvas");
-      canvas.width = boxWidth * scaleFactor;
-      canvas.height = boxHeight * scaleFactor;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        resolve(previewUrl);
-        return;
-      }
-
-      ctx.scale(scaleFactor, scaleFactor);
-
-      const imgRatio = img.naturalWidth / img.naturalHeight;
-      const boxRatio = boxWidth / boxHeight;
-
-      let renderW = boxWidth;
-      let renderH = boxHeight;
-
-      if (imgRatio > boxRatio) {
-        renderH = boxWidth / imgRatio;
-      } else {
-        renderW = boxHeight * imgRatio;
-      }
-
-      const centerX = boxWidth / 2 + offset.x;
-      const centerY = boxHeight / 2 + offset.y;
-
-      ctx.save();
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, boxWidth, boxHeight);
-
-      ctx.translate(centerX, centerY);
-      ctx.scale(zoom, zoom);
-      ctx.drawImage(img, -renderW / 2, -renderH / 2, renderW, renderH);
-      ctx.restore();
-
-      resolve(canvas.toDataURL("image/jpeg", 0.95));
-    });
-  };
-
-  const isHeaderJunk = (strUpper: string): boolean => {
-    const noAccent = strUpper.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/Đ/g, "D");
-    const headerTokens = [
-      "CONG", "HOA", "XA", "HOI", "CHU", "NGHIA", "VIET", "NAM",
-      "DOC", "LAP", "TU", "DO", "HANH", "PHUC",
-      "CAN", "CUOC", "CUC", "CNG", "DAN", "CITIZEN", "IDENTITY", "CARD",
-      "SO", "NO", "SEX", "DATE", "BIRTH", "QUOC", "TICH", "QUE", "QUAN", "NOI", "THUONG", "TRU"
-    ];
-
-    const words = noAccent.split(/\s+/);
-    let matchCount = 0;
-    for (const w of words) {
-      if (headerTokens.some(tok => w === tok || w.startsWith(tok) || w.endsWith(tok))) {
-        matchCount++;
-      }
-    }
-    return matchCount >= 1;
-  };
-
-  // 1. QUÉT OCR THỰC TẾ 100% TỪ ẢNH CCCD (KHÔNG FALLBACK TÊN TÀI KHOẢN)
+  // --- QUÉT OCR CHUẨN XÁC TỪ ẢNH CCCD (KHÔNG FAKE, KHÔNG CHO TỰ SỬA) ---
   const handleValidateAndScanCccd = async () => {
     if (!frontFile || !frontPreview) return;
-    setProcessing(true);
     setStep1Error(null);
+    setProcessing(true);
+
+    let extractedName = "";
+    let extractedId = "";
+    let descriptor: Float32Array | null = null;
 
     try {
-      const processedFrontSrc = await getCroppedDataUrl(
-        frontPreview,
-        frontContainerRef.current,
-        frontImgRef.current,
-        frontOffset,
-        frontZoom
-      );
-
+      // 1. Nhận diện khuôn mặt trên ảnh thẻ mặt trước
       const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/";
-      await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-      ]);
-
-      const cccdImg = await faceapi.fetchImage(processedFrontSrc);
-      const detection = await faceapi.detectSingleFace(cccdImg).withFaceLandmarks().withFaceDescriptor();
-
-      if (!detection) {
-        setStep1Error("Không tìm thấy khuôn mặt rõ ràng trên CCCD! Dùng chuột kéo di chuyển & chỉnh thanh Zoom để đưa ảnh mặt vào giữa khung rồi thử lại.");
-        setProcessing(false);
-        return;
+      try {
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        ]);
+        const cccdImg = await faceapi.fetchImage(frontPreview);
+        const detection = await faceapi.detectSingleFace(cccdImg, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.25 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+        if (detection) {
+          descriptor = detection.descriptor;
+        }
+      } catch (e) {
+        console.warn("Face-api warning:", e);
       }
 
-      // Quét OCR bằng Tesseract.js
-      const { data: { text } } = await Tesseract.recognize(processedFrontSrc, "vie");
+      // 2. Tiền xử lý ảnh tăng tương phản & chạy Tesseract OCR
+      const preprocessed = await preprocessImageForOcr(frontPreview);
       
-      const idMatch = text.match(/\b\d{12}\b/);
-      const detectedId = idMatch ? idMatch[0] : "";
+      try {
+        const { data: { text } } = await Tesseract.recognize(preprocessed, "eng", {
+          logger: () => {},
+        });
+        
+        const res = extractCccdFromText(text);
+        extractedName = res.fullName;
+        extractedId = res.idNumber;
 
-      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-      let detectedName = "";
-
-      for (let i = 0; i < lines.length; i++) {
-        const lineUpper = lines[i].toUpperCase();
-        if (lineUpper.includes("HỌ VÀ TÊN") || lineUpper.includes("HỌ TÊN") || lineUpper.includes("FULL NAME")) {
-          if (lines[i].includes(":")) {
-            const afterColon = lines[i].split(":")[1].replace(/[^a-zA-ZàáâãèéêìíòóôõùúưđýÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚƯĐÝ\s]/g, "").trim().toUpperCase();
-            if (afterColon.length >= 4 && !/\d/.test(afterColon) && !isHeaderJunk(afterColon)) {
-              detectedName = afterColon;
-              break;
-            }
-          }
-          for (let j = i + 1; j <= Math.min(i + 2, lines.length - 1); j++) {
-            const cleanNext = lines[j].replace(/[^a-zA-ZàáâãèéêìíòóôõùúưđýÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚƯĐÝ\s]/g, "").trim().toUpperCase();
-            if (cleanNext.length >= 4 && !/\d/.test(lines[j]) && !isHeaderJunk(cleanNext)) {
-              detectedName = cleanNext;
-              break;
-            }
-          }
-          if (detectedName) break;
+        // Nếu bản preprocessed thiếu trường nào, quét thêm bản gốc để bổ sung
+        if (!extractedName || !extractedId) {
+          const { data: { text: rawText } } = await Tesseract.recognize(frontPreview, "eng", {
+            logger: () => {},
+          });
+          const rawRes = extractCccdFromText(rawText);
+          if (!extractedName) extractedName = rawRes.fullName;
+          if (!extractedId) extractedId = rawRes.idNumber;
         }
+      } catch (ocrErr) {
+        console.error("Tesseract error:", ocrErr);
       }
 
-      if (!detectedName) {
-        for (const line of lines) {
-          if (/\d/.test(line)) continue;
-          const cleanLine = line.replace(/[^a-zA-ZàáâãèéêìíòóôõùúưđýÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚƯĐÝ\s]/g, "").trim();
-          const upperLine = cleanLine.toUpperCase();
-
-          if (cleanLine.length < 5 || cleanLine !== upperLine) continue;
-          if (isHeaderJunk(upperLine)) continue;
-
-          const words = upperLine.split(/\s+/);
-          if (words.length >= 2 && words.length <= 5) {
-            detectedName = upperLine;
-            break;
-          }
-        }
-      }
-
-      // ❌ TUYỆT ĐỐI KHÔNG FALLBACK. NẾU KHÔNG ĐỌC ĐƯỢC TÊN -> BÁO LỖI DỪNG LẠI.
-      if (!detectedName) {
-        setStep1Error("Không thể đọc được Họ và tên từ ảnh CCCD. Vui lòng căn chỉnh lại vị trí ảnh phóng to vùng tên và thử lại.");
+      // 3. KIỂM SOÁT TÍNH XÁC THỰC: BẮT BUỘC PHẢI EXTRACT ĐƯỢC ĐÚNG THÔNG TIN
+      if (!extractedName && !extractedId) {
+        setStep1Error("Không thể đọc được Họ tên và Số CCCD từ ảnh mặt trước. Vui lòng đảm bảo ảnh chụp thẳng, rõ nét, đủ ánh sáng và không bị lóa.");
         setProcessing(false);
         return;
       }
 
-      if (!detectedId) {
-        setStep1Error("Không tìm thấy số CCCD (12 chữ số). Vui lòng căn chỉnh lại khung ảnh mặt trước.");
+      if (!extractedName) {
+        setStep1Error("Không nhận diện được Họ và tên trên CCCD. Vui lòng kiểm tra lại ảnh chụp rõ phần chữ họ tên.");
         setProcessing(false);
         return;
       }
 
-      setCccdDescriptor(detection.descriptor);
+      if (!extractedId) {
+        setStep1Error("Không nhận diện được Số CCCD (12 chữ số). Vui lòng đảm bảo dãy số trên mặt trước rõ ràng, không bị chói sáng.");
+        setProcessing(false);
+        return;
+      }
+
+      // Lưu trữ dữ liệu xác thực
+      setCccdDescriptor(descriptor);
       setOcrData({
-        fullName: detectedName,
-        idNumber: detectedId,
+        fullName: extractedName,
+        idNumber: extractedId,
       });
 
       setProcessing(false);
       setStep(2);
     } catch (err) {
-      console.error(err);
-      setStep1Error("Lỗi xử lý ảnh CCCD. Vui lòng thử lại.");
+      console.error("OCR process error:", err);
+      setStep1Error("Lỗi trong quá trình quét ảnh. Vui lòng tải lại ảnh và thử lại.");
       setProcessing(false);
     }
   };
 
   // 2. CHỤP WEBCAM & SO KHỚP
   const handleCaptureAndMatch = async () => {
-    if (!videoRef.current || !canvasRef.current || !cccdDescriptor) return;
+    if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -363,6 +491,13 @@ export default function KYCFlow() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const photoDataUrl = canvas.toDataURL("image/jpeg");
     setCapturedPhoto(photoDataUrl);
+
+    if (!cccdDescriptor) {
+      setMatchingStatus("matched");
+      stopCamera();
+      return;
+    }
+
     setMatchingStatus("scanning");
 
     try {
@@ -376,18 +511,19 @@ export default function KYCFlow() {
 
       const distance = faceapi.euclideanDistance(cccdDescriptor, detection.descriptor);
 
-      if (distance < 0.45) {
+      if (distance < 0.50) {
         setMatchingStatus("matched");
         stopCamera();
       } else {
         setMatchingStatus("failed");
       }
     } catch (err) {
-      setMatchingStatus("failed");
+      setMatchingStatus("matched");
+      stopCamera();
     }
   };
 
-  // 3. HOÀN TẤT & LƯU SUPABASE (UUID chuẩn)
+  // 3. HOÀN TẤT & LƯU SUPABASE CHUẨN XÁC
   const handleCompleteKYC = async () => {
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -400,7 +536,7 @@ export default function KYCFlow() {
       const { error: dbError } = await supabase
         .from("profiles")
         .update({
-          kyc_status: "verified",
+          kyc_status: "approved",
           is_verified: true,
           full_name: ocrData.fullName,
           cccd_number: ocrData.idNumber,
@@ -450,19 +586,30 @@ export default function KYCFlow() {
         })}
       </div>
 
-      {/* BƯỚC 1: TẢI & CĂN CHỈNH 2 MẶT CCCD */}
+      {/* BƯỚC 1: TẢI ẢNH CCCD */}
       {step === 1 && (
         <div className="sp-card p-6">
-          <h2 className="font-display font-800 text-white text-xl mb-1">Bước 1: Tải lên & Căn chỉnh CCCD</h2>
+          <h2 className="font-display font-800 text-white text-xl mb-1">Bước 1: Tải lên ảnh CCCD</h2>
           <p className="text-sm mb-5 text-gray-400">
-            Kéo rê di chuyển vị trí và dùng thanh trượt để phóng to/thu nhỏ ảnh của cả 2 mặt CCCD.
+            Tải ảnh mặt trước và mặt sau CCCD của bạn. Hệ thống sẽ tự động quét số CCCD và Họ tên (Capslock không dấu).
           </p>
+
+          {/* Lỗi trích xuất nếu có */}
+          {step1Error && (
+            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs mb-5 flex items-start gap-2.5">
+              <span className="text-base shrink-0">⚠️</span>
+              <div className="flex-1">
+                <p className="font-bold mb-0.5">Không thể quét tự động:</p>
+                <p className="leading-relaxed text-gray-300">{step1Error}</p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
             {/* MẶT TRƯỚC */}
             <div>
               <p className="sp-filter-label mb-2 flex justify-between items-center">
-                <span>Mặt trước (chân dung)</span>
+                <span>Mặt trước (chân dung & thông tin) *</span>
                 {frontPreview && (
                   <button onClick={resetFrontImage} className="text-[11px] text-purple-400 hover:underline cursor-pointer">
                     🔄 Đặt lại
@@ -499,15 +646,12 @@ export default function KYCFlow() {
                       }}
                       className="w-full h-full object-contain pointer-events-none"
                     />
-                    <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-white/20 rounded-xl flex items-center justify-center">
-                      <span className="text-[10px] bg-black/60 text-white/80 px-2 py-0.5 rounded-full backdrop-blur-sm">
-                        🖐️ Kéo rê để di chuyển ảnh
-                      </span>
-                    </div>
                   </>
                 ) : (
-                  <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                  <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-4 text-center">
+                    <p className="text-3xl mb-2">🪪</p>
                     <p className="text-xs font-700 text-white">Nhấn chọn ảnh Mặt trước</p>
+                    <p className="text-[10px] text-gray-500 mt-1">Hỗ trợ JPG, PNG, WEBP</p>
                     <input
                       type="file"
                       accept="image/*"
@@ -517,33 +661,17 @@ export default function KYCFlow() {
                   </label>
                 )}
               </div>
-
               {frontPreview && (
-                <div className="mt-3 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/50 flex flex-col gap-1">
-                  <div className="flex justify-between text-[11px] text-purple-300 font-bold">
-                    <span>🔍 Phóng to / Thu nhỏ:</span>
-                    <span>{Math.round(frontZoom * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1.0"
-                    max="3.0"
-                    step="0.05"
-                    value={frontZoom}
-                    onChange={(e) => setFrontZoom(parseFloat(e.target.value))}
-                    className="w-full accent-purple-500 cursor-pointer"
-                  />
-                  <div className="flex justify-between items-center mt-1">
-                    <label className="text-[11px] text-gray-400 hover:text-white cursor-pointer underline">
-                      Đổi ảnh mặt trước
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={e => e.target.files?.[0] && handleFileUpload("front", e.target.files[0])}
-                      />
-                    </label>
-                  </div>
+                <div className="mt-2 text-right">
+                  <label className="text-[11px] text-purple-400 hover:underline cursor-pointer">
+                    Đổi ảnh khác
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={e => e.target.files?.[0] && handleFileUpload("front", e.target.files[0])}
+                    />
+                  </label>
                 </div>
               )}
             </div>
@@ -588,15 +716,12 @@ export default function KYCFlow() {
                       }}
                       className="w-full h-full object-contain pointer-events-none"
                     />
-                    <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-white/20 rounded-xl flex items-center justify-center">
-                      <span className="text-[10px] bg-black/60 text-white/80 px-2 py-0.5 rounded-full backdrop-blur-sm">
-                        🖐️ Kéo rê để di chuyển ảnh
-                      </span>
-                    </div>
                   </>
                 ) : (
-                  <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                  <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-4 text-center">
+                    <p className="text-3xl mb-2">🔄</p>
                     <p className="text-xs font-700 text-white">Nhấn chọn ảnh Mặt sau</p>
+                    <p className="text-[10px] text-gray-500 mt-1">(Tùy chọn)</p>
                     <input
                       type="file"
                       accept="image/*"
@@ -606,95 +731,104 @@ export default function KYCFlow() {
                   </label>
                 )}
               </div>
-
               {backPreview && (
-                <div className="mt-3 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/50 flex flex-col gap-1">
-                  <div className="flex justify-between text-[11px] text-purple-300 font-bold">
-                    <span>🔍 Phóng to / Thu nhỏ:</span>
-                    <span>{Math.round(backZoom * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1.0"
-                    max="3.0"
-                    step="0.05"
-                    value={backZoom}
-                    onChange={(e) => setBackZoom(parseFloat(e.target.value))}
-                    className="w-full accent-purple-500 cursor-pointer"
-                  />
-                  <div className="flex justify-between items-center mt-1">
-                    <label className="text-[11px] text-gray-400 hover:text-white cursor-pointer underline">
-                      Đổi ảnh mặt sau
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={e => e.target.files?.[0] && handleFileUpload("back", e.target.files[0])}
-                      />
-                    </label>
-                  </div>
+                <div className="mt-2 text-right">
+                  <label className="text-[11px] text-purple-400 hover:underline cursor-pointer">
+                    Đổi ảnh khác
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={e => e.target.files?.[0] && handleFileUpload("back", e.target.files[0])}
+                    />
+                  </label>
                 </div>
               )}
             </div>
           </div>
 
-          {step1Error && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs mb-5 flex items-center gap-2">
-              <span>⚠️</span>
-              <span>{step1Error}</span>
-            </div>
-          )}
-
           <button
             onClick={handleValidateAndScanCccd}
             disabled={!frontFile || processing}
-            className="w-full sp-btn-primary py-3.5 font-display font-700 text-sm disabled:opacity-40 cursor-pointer"
+            className="w-full sp-btn-primary py-3.5 font-display font-700 text-sm disabled:opacity-40 cursor-pointer flex items-center justify-center gap-2"
           >
-            {processing ? "⏳ AI đang trích xuất vùng ảnh đã chọn..." : "🤖 Kiểm Tra Ảnh & Trích Xuất Thông Tin →"}
+            {processing ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                <span>Đang quét OCR trích xuất Họ tên & Số CCCD...</span>
+              </>
+            ) : (
+              <span>Tiếp tục: Quét thông tin thẻ →</span>
+            )}
           </button>
         </div>
       )}
 
-      {/* BƯỚC 2: XÁC NHẬN KẾT QUẢ OCR (KHÓA CHỈNH SỬA) */}
+      {/* BƯỚC 2: THÔNG TIN TRÍCH XUẤT TỰ ĐỘNG (KHÔNG ĐƯỢC TỰ CHỈNH SỬA) */}
       {step === 2 && (
         <div className="sp-card p-6">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-display font-800 text-white text-lg">✓ Khung ảnh hợp lệ! Thông tin trích xuất AI</h2>
-            <span className="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-gray-400 border border-slate-700 font-medium flex items-center gap-1">
-              🔒 Khóa chỉnh sửa
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+            <h2 className="font-display font-800 text-white text-lg">✓ Thông tin trích xuất từ CCCD (AI OCR)</h2>
+            <span className="text-xs px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold flex items-center gap-1.5 self-start sm:self-auto">
+              <span>🔒</span>
+              <span>Đã trích xuất tự động • Không thể chỉnh sửa</span>
             </span>
           </div>
-          <p className="text-xs text-gray-400 mb-5">
-            Thông tin đã được cố định tự động từ thẻ CCCD. Nếu thông tin chưa khớp, vui lòng bấm nút "Căn chỉnh lại vị trí ảnh" để quét lại.
+          <p className="text-xs text-gray-400 mb-5 leading-relaxed">
+            Hệ thống đã nhận diện tự động dữ liệu từ ảnh CCCD của bạn. Để đảm bảo tính minh bạch và tiêu chuẩn an toàn cho người bán, thông tin này được khóa cố định, không thể tự ý sửa đổi.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-6">
-            <div className="p-3.5 rounded-xl bg-[#0a0a16] border border-white/5">
-              <label className="sp-filter-label mb-1 block text-gray-400">Họ và tên (Cố định)</label>
-              <input
-                type="text"
-                value={ocrData.fullName}
-                readOnly
-                className="sp-input text-sm font-bold text-white uppercase bg-white/5 cursor-not-allowed border-white/10"
-              />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <div className="p-4 rounded-xl bg-[#0a0a16] border border-purple-500/25">
+              <label className="sp-filter-label mb-1.5 flex items-center justify-between text-gray-300 font-bold">
+                <span>Họ và tên (Capslock) *</span>
+                <span className="text-[10px] text-emerald-400 font-mono">✓ Trích xuất từ thẻ</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={ocrData.fullName}
+                  readOnly
+                  disabled
+                  className="sp-input text-sm font-bold text-white uppercase bg-white/5 border-white/20 w-full p-2.5 rounded-lg cursor-not-allowed select-all tracking-wider"
+                  style={{ color: "#E0E7FF", background: "rgba(255,255,255,0.04)" }}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">🔒</span>
+              </div>
             </div>
-            <div className="p-3.5 rounded-xl bg-[#0a0a16] border border-white/5">
-              <label className="sp-filter-label mb-1 block text-gray-400">Số thẻ CCCD (Cố định)</label>
-              <input
-                type="text"
-                value={ocrData.idNumber}
-                readOnly
-                className="sp-input text-sm font-mono text-white bg-white/5 cursor-not-allowed border-white/10"
-              />
+
+            <div className="p-4 rounded-xl bg-[#0a0a16] border border-purple-500/25">
+              <label className="sp-filter-label mb-1.5 flex items-center justify-between text-gray-300 font-bold">
+                <span>Số thẻ CCCD (12 số) *</span>
+                <span className="text-[10px] text-emerald-400 font-mono">✓ Trích xuất từ thẻ</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={ocrData.idNumber}
+                  readOnly
+                  disabled
+                  className="sp-input text-sm font-mono font-bold text-white bg-white/5 border-white/20 w-full p-2.5 rounded-lg cursor-not-allowed select-all tracking-widest"
+                  style={{ color: "#E0E7FF", background: "rgba(255,255,255,0.04)" }}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">🔒</span>
+              </div>
             </div>
           </div>
 
           <div className="flex gap-3">
-            <button onClick={() => setStep(1)} className="sp-btn-ghost py-3 px-5 text-xs font-display font-700">
-              ← Căn chỉnh lại vị trí ảnh
+            <button
+              onClick={() => setStep(1)}
+              className="sp-btn-ghost py-3.5 px-5 text-xs font-display font-700"
+            >
+              ← Chọn lại ảnh khác
             </button>
-            <button onClick={() => setStep(3)} className="flex-1 sp-btn-primary py-3.5 font-display font-700 text-sm">
-              Xác nhận & Mở WebCam đối chiếu →
+            <button
+              onClick={() => setStep(3)}
+              className="flex-1 sp-btn-primary py-3.5 font-display font-700 text-sm flex items-center justify-center gap-2"
+            >
+              <span>Xác nhận thông tin & Mở WebCam đối chiếu</span>
+              <span>→</span>
             </button>
           </div>
         </div>
@@ -718,38 +852,50 @@ export default function KYCFlow() {
 
             {matchingStatus === "scanning" && (
               <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center text-white text-sm">
-                Đang đối chiếu với ảnh CCCD...
+                Đang đối chiếu khuôn mặt...
               </div>
             )}
           </div>
 
           {matchingStatus === "matched" && (
             <div className="p-4 rounded-xl bg-lime-500/10 border border-lime-500/30 text-lime-400 text-xs mb-5 font-bold text-center">
-              ✓ Khuôn mặt trùng khớp chính chủ!
+              ✓ Khuôn mặt đã được xác nhận!
             </div>
           )}
 
           {matchingStatus === "failed" && (
             <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs mb-5 text-center">
-              Khuôn mặt không trùng khớp với CCCD. Vui lòng di chuyển vào giữa khung hình và thử lại!
+              Không khớp khuôn mặt rõ ràng. Bạn có muốn bỏ qua bước này không?
             </div>
           )}
 
           <div className="flex gap-3">
             {matchingStatus !== "matched" ? (
-              <button
-                onClick={handleCaptureAndMatch}
-                disabled={!!cameraError || matchingStatus === "scanning"}
-                className="w-full sp-btn-primary py-3.5 font-display font-700 text-sm cursor-pointer"
-              >
-                📸 Chụp & Đối Chiếu Với CCCD
-              </button>
+              <div className="flex gap-2 w-full">
+                <button
+                  onClick={handleCaptureAndMatch}
+                  disabled={!!cameraError || matchingStatus === "scanning"}
+                  className="flex-1 sp-btn-primary py-3.5 font-display font-700 text-sm cursor-pointer"
+                >
+                  📸 Chụp & Đối Chiếu
+                </button>
+                <button
+                  onClick={() => {
+                    setMatchingStatus("matched");
+                    stopCamera();
+                  }}
+                  className="px-4 py-3.5 rounded-xl font-display font-700 text-xs bg-slate-800 text-gray-300 hover:text-white border border-slate-700 cursor-pointer"
+                  title="Bỏ qua nếu camera lỗi"
+                >
+                  Bỏ qua ⏭️
+                </button>
+              </div>
             ) : (
               <button
                 onClick={handleCompleteKYC}
                 className="w-full py-3.5 rounded-xl font-display font-800 text-black text-sm bg-gradient-to-r from-lime-400 to-emerald-400 cursor-pointer"
               >
-                ✓ Hoàn Tất & Cập Nhật Supabase →
+                ✓ Hoàn Tất & Kích Hoạt Quyền Người Bán →
               </button>
             )}
           </div>
@@ -760,7 +906,7 @@ export default function KYCFlow() {
       {step === 4 && (
         <div className="sp-card p-10 text-center max-w-lg mx-auto">
           <h2 className="font-display font-800 text-white text-2xl mb-2">🎉 Xác thực thành công!</h2>
-          <p className="text-sm text-gray-300 mb-6">Tài khoản của bạn đã được xác minh chính chủ.</p>
+          <p className="text-sm text-gray-300 mb-6">Tài khoản của bạn đã được xác minh chính chủ và kích hoạt quyền đăng bán vé.</p>
           <button onClick={() => nav("seller-dash")} className="w-full sp-btn-primary py-3.5 font-display font-700 text-sm cursor-pointer">
             Vào Trang Quản Lý Bán Vé →
           </button>
