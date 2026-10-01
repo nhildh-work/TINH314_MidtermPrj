@@ -662,16 +662,60 @@ export default function KYCFlow() {
                 )}
               </div>
               {frontPreview && (
-                <div className="mt-2 text-right">
-                  <label className="text-[11px] text-purple-400 hover:underline cursor-pointer">
-                    Đổi ảnh khác
+                <div className="mt-2.5 space-y-2 bg-[#0a0a16] p-2.5 rounded-xl border border-white/10">
+                  <div className="flex items-center justify-between text-xs text-gray-400">
+                    <span className="flex items-center gap-1.5 font-display font-600 text-gray-300">
+                      <span>🔍</span>
+                      <span>Thu phóng:</span>
+                      <span className="text-purple-400 font-mono font-bold">{Math.round(frontZoom * 100)}%</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={resetFrontImage}
+                        className="text-[11px] text-gray-400 hover:text-white transition-colors"
+                      >
+                        🔄 Về mặc định
+                      </button>
+                      <label className="text-[11px] text-purple-400 hover:underline cursor-pointer">
+                        Đổi ảnh khác
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => e.target.files?.[0] && handleFileUpload("front", e.target.files[0])}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setFrontZoom(z => Math.max(1.0, +(z - 0.2).toFixed(1)))}
+                      className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold text-xs flex items-center justify-center transition-colors"
+                      title="Thu nhỏ"
+                    >
+                      −
+                    </button>
                     <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={e => e.target.files?.[0] && handleFileUpload("front", e.target.files[0])}
+                      type="range"
+                      min="1.0"
+                      max="3.0"
+                      step="0.05"
+                      value={frontZoom}
+                      onChange={e => setFrontZoom(parseFloat(e.target.value))}
+                      className="flex-1 accent-purple-500 h-1.5 bg-white/10 rounded-lg cursor-pointer"
                     />
-                  </label>
+                    <button
+                      onClick={() => setFrontZoom(z => Math.min(3.0, +(z + 0.2).toFixed(1)))}
+                      className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold text-xs flex items-center justify-center transition-colors"
+                      title="Phóng to"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-500 text-center">
+                    💡 Giữ chuột kéo để căn chỉnh ảnh cho ngay ngắn
+                  </p>
                 </div>
               )}
             </div>
@@ -732,16 +776,60 @@ export default function KYCFlow() {
                 )}
               </div>
               {backPreview && (
-                <div className="mt-2 text-right">
-                  <label className="text-[11px] text-purple-400 hover:underline cursor-pointer">
-                    Đổi ảnh khác
+                <div className="mt-2.5 space-y-2 bg-[#0a0a16] p-2.5 rounded-xl border border-white/10">
+                  <div className="flex items-center justify-between text-xs text-gray-400">
+                    <span className="flex items-center gap-1.5 font-display font-600 text-gray-300">
+                      <span>🔍</span>
+                      <span>Thu phóng:</span>
+                      <span className="text-purple-400 font-mono font-bold">{Math.round(backZoom * 100)}%</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={resetBackImage}
+                        className="text-[11px] text-gray-400 hover:text-white transition-colors"
+                      >
+                        🔄 Về mặc định
+                      </button>
+                      <label className="text-[11px] text-purple-400 hover:underline cursor-pointer">
+                        Đổi ảnh khác
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => e.target.files?.[0] && handleFileUpload("back", e.target.files[0])}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setBackZoom(z => Math.max(1.0, +(z - 0.2).toFixed(1)))}
+                      className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold text-xs flex items-center justify-center transition-colors"
+                      title="Thu nhỏ"
+                    >
+                      −
+                    </button>
                     <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={e => e.target.files?.[0] && handleFileUpload("back", e.target.files[0])}
+                      type="range"
+                      min="1.0"
+                      max="3.0"
+                      step="0.05"
+                      value={backZoom}
+                      onChange={e => setBackZoom(parseFloat(e.target.value))}
+                      className="flex-1 accent-purple-500 h-1.5 bg-white/10 rounded-lg cursor-pointer"
                     />
-                  </label>
+                    <button
+                      onClick={() => setBackZoom(z => Math.min(3.0, +(z + 0.2).toFixed(1)))}
+                      className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white font-bold text-xs flex items-center justify-center transition-colors"
+                      title="Phóng to"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-500 text-center">
+                    💡 Giữ chuột kéo để căn chỉnh ảnh cho ngay ngắn
+                  </p>
                 </div>
               )}
             </div>
