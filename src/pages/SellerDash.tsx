@@ -161,7 +161,8 @@ export default function SellerDash() {
     loadSellerTickets();
   }, [currentUser]);
 
-  const allSellerListings = [...sellerTickets, ...MY_LISTINGS];
+  // Chỉ hiển thị vé do chính người bán này tạo ra, tài khoản mới sẽ bắt đầu với 0 vé
+  const allSellerListings = sellerTickets;
 
   if (kycStatus !== "approved") {
     return (

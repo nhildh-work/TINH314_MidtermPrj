@@ -81,19 +81,6 @@ export default function Navbar() {
           {lang === "vi" ? "🇺🇸 EN" : "🇻🇳 VI"}
         </button>
 
-        {/* Quick button to view registered users */}
-        <button
-          onClick={() => setShowUsersModal(true)}
-          title="Xem danh sách người đăng ký"
-          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-display font-700 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/25 transition-all"
-        >
-          <span>👥</span>
-          <span>Thành viên</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/30 text-[10px] text-white">
-            {registeredUsers.length}
-          </span>
-        </button>
-
         {/* Cart */}
         <button className="sp-cart-btn" onClick={() => { if (isLoggedIn) nav("my-tickets"); else setAuthModal("login"); }}>
           <span>🛍️</span>
@@ -126,19 +113,6 @@ export default function Navbar() {
                 >
                   <span>👤</span>
                   <span>{t.myAccount}</span>
-                </button>
-
-                <button
-                  onClick={() => { setShowUserMenu(false); setShowUsersModal(true); }}
-                  className="w-full text-left px-4 py-2.5 text-xs font-display font-600 text-purple-300 hover:bg-white/5 transition-colors flex items-center justify-between"
-                >
-                  <span className="flex items-center gap-2">
-                    <span>👥</span>
-                    <span>Danh sách người đăng ký</span>
-                  </span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-200">
-                    {registeredUsers.length}
-                  </span>
                 </button>
 
                 <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />

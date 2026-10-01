@@ -871,7 +871,8 @@ export default function DisputeCenter() {
     buyerSubmittedAt: pd.buyerSubmittedAt,
   }));
 
-  const visibleDisputes = [...dynamicAsDisputes, ...DISPUTES];
+  // Tài khoản người dùng sẽ hiển thị sạch các tranh chấp của chính họ, không gộp mẫu DISPUTES của người khác
+  const visibleDisputes = dynamicAsDisputes;
 
   // Seller-respond view
   if (view === "seller-respond" && selectedDispute) {
@@ -962,12 +963,15 @@ export default function DisputeCenter() {
 
       <div
         className="mb-6 p-4 rounded-xl flex items-start gap-3"
-        style={{ background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.15)" }}
+        style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}
       >
-        <span className="text-xl shrink-0">⚖️</span>
+        <span className="text-xl shrink-0">⚡</span>
         <div>
-          <p className="text-sm font-display font-700 text-blue-400 mb-1">{t.dcProcessTitle}</p>
-          <p className="text-xs leading-relaxed" style={{ color: "#9ca3af" }}>{t.dcProcessDesc}</p>
+          <p className="text-sm font-display font-700 text-red-400 mb-1">Cơ chế bảo vệ Fast-Track Escrow (15 - 30 Phút Sát Giờ Diễn)</p>
+          <p className="text-xs leading-relaxed text-gray-300">
+            • <strong>Sự cố tại cổng soát vé (trước show 2 giờ):</strong> Hệ thống đóng băng tiền ngay lập tức. Admin xác minh video quay cổng soát vé và ra phán quyết trong <strong>15 - 30 phút</strong> để bạn kịp mua vé thay thế hoặc nhận hoàn tiền 100%.<br/>
+            • <strong>Sự cố thông thường:</strong> Người bán có tối đa <strong>2 giờ</strong> để cung cấp bằng chứng đối chất. Quá hạn tự động hoàn tiền cho người mua.
+          </p>
         </div>
       </div>
 

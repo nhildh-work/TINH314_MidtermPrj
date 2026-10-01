@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useApp } from "../context";
 import { supabase } from "../lib/supabaseClient";
 
@@ -24,19 +24,23 @@ export default function AuthModal() {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Google chooser state
   const [showGoogleChooser, setShowGoogleChooser] = useState(false);
   const [customGoogleEmail, setCustomGoogleEmail] = useState("");
   const [customGoogleName, setCustomGoogleName] = useState("");
-  const [showCustomGoogleForm, setShowCustomGoogleForm] = useState(false);
 
   if (authModal === "none") return null;
 
+  const handleClose = () => {
+    setAuthModal("none");
+    setShowGoogleChooser(false);
+    setErrorMsg(null);
+  };
+
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       setErrorMsg("Vui lòng nhập đầy đủ Email và Mật khẩu");
       return;
     }
@@ -45,38 +49,35 @@ export default function AuthModal() {
       setLoading(true);
       setErrorMsg(null);
 
-      // Best effort Supabase Auth
+      // 1. Thử đăng nhập qua Supabase Auth
+      let supabaseSuccess = false;
       try {
-        await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
+        if (data?.user && !error) {
+          supabaseSuccess = true;
+        }
       } catch (err) {
-        console.warn("Supabase signIn notice:", err);
+        console.warn("Supabase signIn error:", err);
       }
 
-      // Check registered users list or auto-login
-      const existing = registeredUsers.find(
+      // 2. Kiểm tra trong danh sách người dùng đã đăng ký
+      const existing = (registeredUsers || []).find(
         u => u.email?.toLowerCase() === email.trim().toLowerCase()
       );
 
       if (existing) {
         loginAsUser(existing);
+        handleClose();
+      } else if (supabaseSuccess) {
+        handleClose();
       } else {
-        // Auto register / login
-        const fallbackName = email.trim().split("@")[0];
-        registerUserDirect({
-          fullName: fallbackName.charAt(0).toUpperCase() + fallbackName.slice(1),
-          email: email.trim(),
-          phone: "090" + Math.floor(1000000 + Math.random() * 9000000),
-          role: role || "buyer",
-          provider: "email",
-        });
+        setErrorMsg("Tài khoản chưa được đăng ký hoặc sai mật khẩu. Vui lòng bấm sang tab 'Đăng ký' để tạo tài khoản mới!");
       }
-
-      setAuthModal("none");
     } catch (err: any) {
-      setErrorMsg(err.message || "Đăng nhập thất bại");
+      setErrorMsg(err?.message || "Đăng nhập thất bại");
     } finally {
       setLoading(false);
     }
@@ -85,11 +86,20 @@ export default function AuthModal() {
   const handleRegister = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!agreed) {
-      setErrorMsg("Bạn cần đồng ý với điều khoản sử dụng");
+      setErrorMsg("Bạn cần đồng ý với Điều khoản sử dụng của SafePass");
       return;
     }
-    if (!email || !password || !fullName) {
+    if (!email.trim() || !password || !fullName.trim()) {
       setErrorMsg("Vui lòng điền đầy đủ Họ tên, Email và Mật khẩu");
+      return;
+    }
+
+    // Kiểm tra xem email này đã tồn tại chưa
+    const existing = (registeredUsers || []).find(
+      u => u.email?.toLowerCase() === email.trim().toLowerCase()
+    );
+    if (existing) {
+      setErrorMsg("Email này đã được đăng ký tài khoản. Vui lòng chuyển sang tab 'Đăng nhập'!");
       return;
     }
 
@@ -97,7 +107,7 @@ export default function AuthModal() {
       setLoading(true);
       setErrorMsg(null);
 
-      // Best effort Supabase signUp in background
+      // Đăng ký lên Supabase Auth
       try {
         await supabase.auth.signUp({
           email: email.trim(),
@@ -111,10 +121,10 @@ export default function AuthModal() {
           },
         });
       } catch (err) {
-        console.warn("Supabase signUp notice:", err);
+        console.warn("Supabase signUp error:", err);
       }
 
-      // Record user immediately and log them in!
+      // Tạo tài khoản người dùng mới tinh và đăng nhập
       registerUserDirect({
         fullName: fullName.trim(),
         email: email.trim(),
@@ -123,27 +133,9 @@ export default function AuthModal() {
         provider: "email",
       });
 
-      setAuthModal("none");
+      handleClose();
     } catch (err: any) {
-      setErrorMsg(err.message || "Đăng ký thất bại");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleSelect = (gUser: { name: string; email: string; avatarUrl?: string }) => {
-    setLoading(true);
-    try {
-      registerUserDirect({
-        fullName: gUser.name,
-        email: gUser.email,
-        phone: "09" + Math.floor(10000000 + Math.random() * 90000000),
-        role: role || "buyer",
-        provider: "google",
-        avatarUrl: gUser.avatarUrl,
-      });
-      setShowGoogleChooser(false);
-      setAuthModal("none");
+      setErrorMsg(err?.message || "Đăng ký thất bại");
     } finally {
       setLoading(false);
     }
@@ -160,142 +152,101 @@ export default function AuthModal() {
         },
       });
       if (error) {
-        console.warn("Supabase Google OAuth notice:", error.message);
-        setErrorMsg(error.message);
+        console.warn("Supabase Google OAuth error:", error.message);
         setShowGoogleChooser(true);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || "Không thể khởi động đăng nhập Google");
       setShowGoogleChooser(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpenGoogle = () => {
-    handleGoogleAuth();
+  const handleCustomGoogleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customGoogleEmail.trim() || !customGoogleName.trim()) {
+      setErrorMsg("Vui lòng nhập họ tên và email Google của bạn");
+      return;
+    }
+    setLoading(true);
+    try {
+      registerUserDirect({
+        fullName: customGoogleName.trim(),
+        email: customGoogleEmail.trim(),
+        role: role || "buyer",
+        provider: "google",
+      });
+      handleClose();
+    } finally {
+      setLoading(false);
+    }
   };
-
-  const GOOGLE_PRESETS = [
-    {
-      name: "Nguyễn Hoàng Nam",
-      email: "namnguyen.dev@gmail.com",
-      avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop&crop=faces",
-    },
-    {
-      name: "Trần Phương Linh",
-      email: "phuonglinh.tran99@gmail.com",
-      avatarUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&h=150&fit=crop&crop=faces",
-    },
-    {
-      name: "Lê Tuấn Anh",
-      email: "tuananh.le88@gmail.com",
-      avatarUrl: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&h=150&fit=crop&crop=faces",
-    },
-  ];
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.88)", backdropFilter: "blur(10px)" }}
-      onClick={() => { setAuthModal("none"); setShowGoogleChooser(false); }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+      onClick={handleClose}
     >
       <div
-        className="sp-card w-full max-w-md overflow-y-auto relative"
+        className="w-full max-w-md rounded-2xl bg-[#0f0f23] border border-white/10 shadow-2xl overflow-y-auto relative p-6 text-white"
         style={{ maxHeight: "90vh" }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Google Chooser Overlay View */}
+        {/* Nút đóng */}
+        <button
+          type="button"
+          onClick={handleClose}
+          className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-colors z-10"
+        >
+          ✕
+        </button>
+
+        {/* View chọn Google khi popup bị chặn */}
         {showGoogleChooser ? (
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/10">
-              <div className="flex items-center gap-2">
-                <GoogleIcon />
-                <h3 className="font-display font-700 text-white text-base">Đăng nhập với Google</h3>
-              </div>
-              <button
-                onClick={() => setShowGoogleChooser(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10"
-              >
-                ✕
-              </button>
+          <div>
+            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
+              <GoogleIcon />
+              <h3 className="font-display font-700 text-white text-base">Đăng nhập tài khoản Google</h3>
             </div>
 
             <p className="text-xs text-gray-300 mb-4">
-              Chọn tài khoản Google của bạn để đăng nhập nhanh vào <strong className="text-white">SafePass</strong>:
+              Nhập email Google của bạn để liên kết nhanh vào SafePass:
             </p>
 
-            <div className="space-y-2 mb-4">
-              {GOOGLE_PRESETS.map((acc, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleGoogleSelect(acc)}
-                  className="w-full p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-3 text-left transition-all group"
-                >
-                  <img
-                    src={acc.avatarUrl}
-                    alt={acc.name}
-                    className="w-10 h-10 rounded-full object-cover shrink-0 border border-white/20"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-600 text-white group-hover:text-purple-300 transition-colors">
-                      {acc.name}
-                    </p>
-                    <p className="text-xs text-gray-400 truncate">{acc.email}</p>
-                  </div>
-                  <span className="text-gray-500 text-xs">➔</span>
-                </button>
-              ))}
-            </div>
-
-            {!showCustomGoogleForm ? (
-              <button
-                onClick={() => setShowCustomGoogleForm(true)}
-                className="w-full py-2.5 rounded-xl border border-dashed border-white/20 text-xs text-gray-400 hover:text-white hover:border-purple-400/50 transition-all flex items-center justify-center gap-1.5"
-              >
-                <span>➕</span> Sử dụng tài khoản Google khác...
-              </button>
-            ) : (
-              <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-2.5 animate-fadeIn">
-                <p className="text-xs font-600 text-purple-300">Nhập thông tin tài khoản Google của bạn:</p>
+            <form onSubmit={handleCustomGoogleSubmit} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">Họ và tên</label>
                 <input
                   type="text"
-                  placeholder="Họ và tên Google (VD: Nguyễn Văn A)"
                   value={customGoogleName}
                   onChange={e => setCustomGoogleName(e.target.value)}
-                  className="sp-input text-xs"
+                  placeholder="Ví dụ: Nguyễn Văn A"
+                  className="sp-input w-full"
+                  required
                 />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">Địa chỉ Gmail</label>
                 <input
                   type="email"
-                  placeholder="Email Google (VD: user@gmail.com)"
                   value={customGoogleEmail}
                   onChange={e => setCustomGoogleEmail(e.target.value)}
-                  className="sp-input text-xs"
+                  placeholder="user@gmail.com"
+                  className="sp-input w-full"
+                  required
                 />
-                <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={() => {
-                      if (!customGoogleEmail) return;
-                      handleGoogleSelect({
-                        name: customGoogleName || customGoogleEmail.split("@")[0],
-                        email: customGoogleEmail,
-                      });
-                    }}
-                    className="flex-1 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-700 transition-colors"
-                  >
-                    Đăng nhập tài khoản này
-                  </button>
-                  <button
-                    onClick={() => setShowCustomGoogleForm(false)}
-                    className="px-3 py-2 rounded-lg bg-white/10 text-gray-400 hover:text-white text-xs transition-colors"
-                  >
-                    Hủy
-                  </button>
-                </div>
               </div>
-            )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 rounded-xl font-display font-700 text-white text-sm bg-purple-600 hover:bg-purple-700 transition-colors mt-2"
+              >
+                {loading ? "Đang xử lý..." : "Xác nhận đăng nhập Google"}
+              </button>
+            </form>
 
             <button
+              type="button"
               onClick={() => setShowGoogleChooser(false)}
               className="w-full mt-4 text-center text-xs text-gray-400 hover:text-gray-300"
             >
@@ -303,173 +254,147 @@ export default function AuthModal() {
             </button>
           </div>
         ) : (
-          <div className="p-6">
-            <button
-              onClick={() => setAuthModal("none")}
-              className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
-              style={{ color: "rgba(255,255,255,0.4)", zIndex: 2 }}
-            >
-              ✕
-            </button>
-
-            {/* Logo */}
-            <div className="flex items-center gap-2 mb-6">
-              <div className="sp-logo-mark">🛡️</div>
+          <div>
+            {/* Header Logo */}
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-xl">
+                🛡️
+              </div>
               <div>
                 <p className="font-display font-800 text-white text-xl leading-none">SafePass</p>
-                <p className="text-xs mt-0.5" style={{ color: "#9ca3af" }}>Nhượng vé êm ru, đi đu hết sầu</p>
+                <p className="text-xs text-gray-400 mt-1">Sàn nhượng vé sự kiện an toàn</p>
               </div>
             </div>
 
-            {/* Messages */}
+            {/* Error Message */}
             {errorMsg && (
-              <div className="p-3 mb-4 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
-                ⚠️ {errorMsg}
-              </div>
-            )}
-            {successMsg && (
-              <div className="p-3 mb-4 rounded-xl text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
-                ✅ {successMsg}
+              <div className="p-3 mb-4 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300 flex items-start gap-2">
+                <span>⚠️</span>
+                <span>{errorMsg}</span>
               </div>
             )}
 
-            {/* Tab switcher */}
-            <div className="flex gap-1 p-1 rounded-xl mb-5" style={{ background: "#0a0a18" }}>
-              {(["login", "register"] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => { setTab(t); setErrorMsg(null); }}
-                  className="flex-1 py-2 rounded-lg text-sm font-display font-700 transition-all"
-                  style={{
-                    background: tab === t ? "linear-gradient(135deg,#7C3AED,#A855F7)" : "transparent",
-                    color: tab === t ? "#fff" : "#6b7280",
-                  }}
-                >
-                  {t === "login" ? "Đăng nhập" : "Đăng ký"}
-                </button>
-              ))}
+            {/* Tab Switcher */}
+            <div className="flex gap-1 p-1 rounded-xl mb-5 bg-[#070716] border border-white/5">
+              <button
+                type="button"
+                onClick={() => { setTab("login"); setErrorMsg(null); }}
+                className={`flex-1 py-2 rounded-lg text-sm font-display font-700 transition-all ${
+                  tab === "login" ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Đăng nhập
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTab("register"); setErrorMsg(null); }}
+                className={`flex-1 py-2 rounded-lg text-sm font-display font-700 transition-all ${
+                  tab === "register" ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Đăng ký
+              </button>
             </div>
 
+            {/* Nút đăng nhập Google */}
+            <button
+              type="button"
+              onClick={handleGoogleAuth}
+              className="w-full flex items-center justify-center gap-3 py-2.5 rounded-xl font-semibold text-sm bg-white hover:bg-gray-100 text-gray-900 transition-all mb-4 shadow cursor-pointer"
+            >
+              <GoogleIcon />
+              <span>{tab === "login" ? "Tiếp tục với Google" : "Đăng ký nhanh với Google"}</span>
+            </button>
+
+            <div className="relative my-4 text-center">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10" />
+              </div>
+              <span className="relative px-3 text-xs bg-[#0f0f23] text-gray-500">hoặc dùng email</span>
+            </div>
+
+            {/* TAB ĐĂNG NHẬP */}
             {tab === "login" ? (
               <form onSubmit={handleLogin} className="space-y-3">
-                <button
-                  type="button"
-                  onClick={handleOpenGoogle}
-                  className="w-full flex items-center justify-center gap-3 py-3 rounded-xl font-600 text-sm transition-all hover:opacity-90 cursor-pointer shadow-md"
-                  style={{ background: "#fff", color: "#111", fontFamily: "Inter, sans-serif" }}
-                >
-                  <GoogleIcon /> Tiếp tục với Google
-                </button>
-                <div className="text-center -mt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowGoogleChooser(true)}
-                    className="text-[11px] text-gray-500 hover:text-purple-300 transition-colors"
-                  >
-                    (hoặc chọn nhanh tài khoản mẫu)
-                  </button>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Email</label>
+                  <input
+                    type="email"
+                    placeholder="email@example.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                    className="sp-input w-full"
+                  />
                 </div>
-
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }} />
-                  </div>
-                  <div className="relative text-center">
-                    <span className="px-2 text-xs" style={{ background: "#0d0d1e", color: "#4b5563" }}>hoặc email</span>
-                  </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Mật khẩu</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    className="sp-input w-full"
+                  />
                 </div>
-
-                <input
-                  type="email"
-                  placeholder="Email của bạn"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  required
-                  className="sp-input"
-                />
-                <input
-                  type="password"
-                  placeholder="Mật khẩu"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                  className="sp-input"
-                />
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full sp-btn-primary py-3 font-display font-700 disabled:opacity-50"
+                  className="w-full sp-btn-primary py-3 font-display font-700 mt-2 disabled:opacity-50"
                 >
-                  {loading ? "Đang xử lý..." : "Đăng nhập ngay"}
+                  {loading ? "Đang kiểm tra tài khoản..." : "Đăng nhập ngay"}
                 </button>
-                <p className="text-center text-xs" style={{ color: "#6b7280" }}>
-                  Bảo vệ tài khoản qua SafePass Security & Mã hóa 2 lớp.
-                </p>
               </form>
             ) : (
+              /* TAB ĐĂNG KÝ */
               <form onSubmit={handleRegister} className="space-y-3">
-                <button
-                  type="button"
-                  onClick={handleOpenGoogle}
-                  className="w-full flex items-center justify-center gap-3 py-3 rounded-xl font-600 text-sm transition-all hover:opacity-90 cursor-pointer shadow-md"
-                  style={{ background: "#fff", color: "#111", fontFamily: "Inter, sans-serif" }}
-                >
-                  <GoogleIcon /> Đăng ký nhanh với Google
-                </button>
-                <div className="text-center -mt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowGoogleChooser(true)}
-                    className="text-[11px] text-gray-500 hover:text-purple-300 transition-colors"
-                  >
-                    (hoặc chọn nhanh tài khoản mẫu)
-                  </button>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Họ và tên của bạn</label>
+                  <input
+                    type="text"
+                    placeholder="Nguyễn Văn A"
+                    value={fullName}
+                    onChange={e => setFullName(e.target.value)}
+                    required
+                    className="sp-input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Email đăng ký</label>
+                  <input
+                    type="email"
+                    placeholder="email@example.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                    className="sp-input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Số điện thoại (nhận vé)</label>
+                  <input
+                    type="tel"
+                    placeholder="09xx xxx xxx"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    className="sp-input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Mật khẩu</label>
+                  <input
+                    type="password"
+                    placeholder="Ít nhất 6 ký tự"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    className="sp-input w-full"
+                  />
                 </div>
 
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }} />
-                  </div>
-                  <div className="relative text-center">
-                    <span className="px-2 text-xs" style={{ background: "#0d0d1e", color: "#4b5563" }}>hoặc tạo tài khoản</span>
-                  </div>
-                </div>
-
-                <input
-                  type="text"
-                  placeholder="Họ và tên"
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  required
-                  className="sp-input"
-                />
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  required
-                  className="sp-input"
-                />
-                <input
-                  type="tel"
-                  placeholder="Số điện thoại"
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  className="sp-input"
-                />
-                <input
-                  type="password"
-                  placeholder="Mật khẩu"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                  className="sp-input"
-                />
-
-                {/* Policy checkboxes */}
-                <div className="space-y-3 pt-1">
-                  <label className="flex items-start gap-2 cursor-pointer">
+                <div className="space-y-2 pt-1">
+                  <label className="flex items-start gap-2 cursor-pointer text-xs text-gray-400">
                     <input
                       type="checkbox"
                       checked={agreed}
@@ -477,13 +402,9 @@ export default function AuthModal() {
                       className="mt-0.5 shrink-0"
                       style={{ accentColor: "#7C3AED" }}
                     />
-                    <p className="text-xs leading-relaxed" style={{ color: "#9ca3af" }}>
-                      Tôi đã đọc và đồng ý với{" "}
-                      <span className="text-purple-400 underline cursor-pointer">Điều khoản sử dụng</span> và{" "}
-                      <span className="text-purple-400 underline cursor-pointer">Quy định mua bán vé</span> của SafePass.
-                    </p>
+                    <span>Tôi đồng ý với Điều khoản và Quy định mua bán của SafePass.</span>
                   </label>
-                  <label className="flex items-start gap-2 cursor-pointer">
+                  <label className="flex items-start gap-2 cursor-pointer text-xs text-gray-400">
                     <input
                       type="checkbox"
                       checked={agreedAntiScam}
@@ -491,18 +412,16 @@ export default function AuthModal() {
                       className="mt-0.5 shrink-0"
                       style={{ accentColor: "#7C3AED" }}
                     />
-                    <p className="text-xs leading-relaxed" style={{ color: "#9ca3af" }}>
-                      Tôi hiểu rằng đăng bán vé giả mạo hoặc vé không hợp lệ sẽ bị khóa tài khoản vĩnh viễn và bàn giao cho cơ quan chức năng.
-                    </p>
+                    <span>Tôi cam kết không mua bán vé giả, vé gian lận.</span>
                   </label>
                 </div>
 
                 <button
                   type="submit"
                   disabled={!agreed || loading}
-                  className="w-full sp-btn-primary py-3 font-display font-700 disabled:opacity-50"
+                  className="w-full sp-btn-primary py-3 font-display font-700 mt-2 disabled:opacity-50"
                 >
-                  {loading ? "Đang tạo tài khoản..." : "Tạo tài khoản & Đăng nhập"}
+                  {loading ? "Đang tạo tài khoản..." : "Tạo tài khoản SafePass"}
                 </button>
               </form>
             )}

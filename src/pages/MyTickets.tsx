@@ -87,7 +87,8 @@ export default function MyTickets() {
     loadMyTransactions();
   }, [currentUser]);
 
-  const allTickets = [...contextPurchasedTickets, ...purchasedTickets, ...MY_TICKETS];
+  // Chỉ lấy vé người dùng hiện tại thực sự đã mua (qua Supabase hoặc trong phiên làm việc)
+  const allTickets = [...contextPurchasedTickets, ...purchasedTickets];
 
   if (!isLoggedIn) {
     return (
