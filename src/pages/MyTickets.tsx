@@ -127,8 +127,18 @@ export default function MyTickets() {
   // Kết hợp vé từ Supabase và vé từ Local Context an toàn không mất vé
   const combinedTickets = [...purchasedTickets, ...(contextPurchasedTickets || [])];
   const seenIds = new Set<number>();
+  const uid = currentUser?.id || currentProfile?.id;
+
   const allTickets = combinedTickets.filter(t => {
     if (seenIds.has(t.id)) return false;
+
+    // 🛑 BẢO VỆ TUYỆT ĐỐI: Không bao giờ hiện vé do CHÍNH MÌNH ĐĂNG BÁN trong Giỏ hàng/Vé của mình
+    const sellerId = (t as any).seller_id || (t as any).sellerId;
+    if (uid && sellerId && String(sellerId) === String(uid)) return false;
+
+    // 🛑 Tuyệt đối không hiện vé cọc ký quỹ
+    if ((t as any).isDeposit || t.tier?.includes("Cọc")) return false;
+
     seenIds.add(t.id);
     return true;
   });
@@ -175,9 +185,10 @@ export default function MyTickets() {
       ) : (
         <div className="space-y-5">
           {allTickets.map(ticket => {
-            const effectiveStatus = checkedIn.has(ticket.id) ? "completed" : reportedTicketIds.includes(ticket.id) ? "dispute" : ticket.status;
+            const isDisputed = reportedTicketIds.includes(ticket.id) || ticket.status === "dispute";
+            const isCompleted = checkedIn.has(ticket.id) || ticket.status === "completed";
+            const effectiveStatus = isDisputed ? "dispute" : isCompleted ? "completed" : "locked";
             const cfg = STATUS_CFG[effectiveStatus] || STATUS_CFG.locked;
-            const isLocked = effectiveStatus === "locked";
 
             return (
               <div key={ticket.id} className="sp-card overflow-hidden transition-all duration-200 hover:border-purple-500/30">
@@ -234,41 +245,47 @@ export default function MyTickets() {
                     <span>Xem Vé Điện Tử & Mã Quét Cổng (QR / PDF)</span>
                   </button>
 
-                  {isLocked && (
+                  {!isDisputed && !isCompleted && (
                     <div className="space-y-2">
                       <p className="text-xs text-center pb-1 text-gray-400">{t.checkinHint}</p>
                       <button
                         onClick={() => setCheckedIn(prev => new Set([...prev, ticket.id]))}
-                        className="w-full py-2.5 rounded-xl font-display font-700 text-xs text-white transition-all hover:opacity-95 flex items-center justify-center gap-1.5"
+                        className="w-full py-2.5 rounded-xl font-display font-700 text-xs text-white transition-all hover:opacity-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
                         style={{ background: "linear-gradient(135deg,#065F46,#059669)" }}
                       >
                         {t.checkinBtn}
                       </button>
                       <button
                         onClick={() => { addReportedTicket(ticket.id); openDispute(ticket); }}
-                        className="w-full py-2 rounded-xl font-display font-700 text-xs transition-all flex items-center justify-center gap-1.5"
-                        style={{ color: "#F87171", border: "1px solid rgba(248,113,113,0.25)", background: "transparent" }}
+                        className="w-full py-2.5 rounded-xl font-display font-700 text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer hover:bg-red-500/10"
+                        style={{ color: "#F87171", border: "1px solid rgba(248,113,113,0.35)", background: "rgba(248,113,113,0.06)" }}
                       >
                         {t.reportBtn}
                       </button>
                     </div>
                   )}
 
-                  {effectiveStatus === "dispute" && (
+                  {isDisputed && (
                     <div className="text-center p-3 rounded-xl" style={{ background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.2)" }}>
                       <p className="text-xs font-display font-700" style={{ color: "#F87171" }}>{t.reportedStatus}</p>
                       <button
                         onClick={() => nav("dispute-center")}
-                        className="mt-2 text-xs font-display font-700 text-red-400 underline hover:text-red-300"
+                        className="mt-2 text-xs font-display font-700 text-red-400 underline hover:text-red-300 cursor-pointer"
                       >
                         Xem tiến độ xử lý tại Trung tâm tranh chấp →
                       </button>
                     </div>
                   )}
 
-                  {effectiveStatus === "completed" && (
-                    <div className="text-center p-3 rounded-xl" style={{ background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.2)" }}>
+                  {isCompleted && (
+                    <div className="text-center p-3 rounded-xl space-y-2" style={{ background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.2)" }}>
                       <p className="text-xs font-display font-700" style={{ color: "#34D399" }}>{t.completedMsg}</p>
+                      <button
+                        onClick={() => { addReportedTicket(ticket.id); openDispute(ticket); }}
+                        className="text-[11px] text-red-400 hover:text-red-300 underline font-semibold block mx-auto cursor-pointer"
+                      >
+                        Gặp sự cố sau khi vào cổng? Bấm để khiếu nại tranh chấp
+                      </button>
                     </div>
                   )}
                 </div>

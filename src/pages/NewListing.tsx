@@ -12,9 +12,12 @@ export default function NewListing() {
   const [city, setCity] = useState("Hà Nội");
   const [venue, setVenue] = useState("");
   const [tier, setTier] = useState("Standard");
+  const [seatZone, setSeatZone] = useState("");
   const [quantity, setQuantity] = useState<number>(1);
   const [pricePerTicket, setPricePerTicket] = useState<number>(500000);
   const [qrFile, setQrFile] = useState<File | null>(null);
+  const [seatMapFile, setSeatMapFile] = useState<File | null>(null);
+  const [seatMapPreview, setSeatMapPreview] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -53,6 +56,15 @@ export default function NewListing() {
     setLoading(true);
 
     try {
+      const fullTier = seatZone.trim()
+        ? `${tier.trim()} [Vị trí: ${seatZone.trim()}]`
+        : tier.trim();
+
+      const combinedNotes = [
+        seatZone.trim() ? `Vị trí đứng/ghế: ${seatZone.trim()}` : "",
+        notes.trim()
+      ].filter(Boolean).join(" | ");
+
       // Chuẩn bị dữ liệu danh sách vé theo số lượng người bán điền
       const ticketsToInsert = Array.from({ length: quantity }, (_, idx) => ({
         seller_id: activeUserId,
@@ -60,11 +72,11 @@ export default function NewListing() {
         event_date: eventDate,
         venue: venue.trim(),
         city: city.trim(),
-        tier: quantity > 1 ? `${tier.trim()} (Vé #${idx + 1})` : tier.trim(),
+        tier: quantity > 1 ? `${fullTier} (Vé #${idx + 1})` : fullTier,
         price: Number(pricePerTicket),
         qr_code_url: qrFile ? qrFile.name : null,
         status: "available",
-        notes: notes.trim() || null,
+        notes: combinedNotes || null,
         created_at: new Date().toISOString(),
       }));
 
@@ -260,6 +272,60 @@ export default function NewListing() {
               required
             />
           </div>
+        </div>
+
+        {/* Vị trí đứng & Sơ đồ chỗ đứng (Map) - Optional */}
+        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/8 space-y-4">
+          <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+            <span className="text-base">🗺️</span>
+            <h3 className="font-display font-700 text-white text-xs uppercase tracking-wider">
+              Vị Trí Đứng & Sơ Đồ Chỗ (Optional - Tùy Chọn)
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="sp-filter-label mb-1.5 block text-gray-200">
+                Chỗ ngồi / Vị trí đứng cụ thể (Optional)
+              </label>
+              <input
+                type="text"
+                value={seatZone}
+                onChange={e => setSeatZone(e.target.value)}
+                className="sp-input text-sm"
+                placeholder="VD: Khu Standing A - Cổng 2, Hoặc Hàng H - Ghế 15..."
+              />
+            </div>
+
+            <div>
+              <label className="sp-filter-label mb-1.5 block text-gray-200">
+                Tải ảnh sơ đồ vị trí đứng / Seat Map (Optional)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={e => {
+                  const file = e.target.files?.[0] || null;
+                  setSeatMapFile(file);
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => setSeatMapPreview(reader.result as string);
+                    reader.readAsDataURL(file);
+                  } else {
+                    setSeatMapPreview(null);
+                  }
+                }}
+                className="sp-input text-xs cursor-pointer file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-purple-600/80 file:text-white"
+              />
+            </div>
+          </div>
+
+          {seatMapPreview && (
+            <div className="mt-2 p-2 rounded-xl bg-black/40 border border-white/10 max-w-xs">
+              <p className="text-[10px] text-gray-400 mb-1">Xem trước sơ đồ chỗ đứng:</p>
+              <img src={seatMapPreview} alt="Sơ đồ vị trí" className="w-full h-32 object-contain rounded-lg bg-black" />
+            </div>
+          )}
         </div>
 
         {/* Upload File Vé / Ảnh QR */}
