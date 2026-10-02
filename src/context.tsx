@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import type { View, Role, KycStatus, EventData, TicketListing, MyTicket } from "./data";
 import type { Lang, T } from "./i18n";
-import { translations } from "./i18n";
+import { getTranslations } from "./i18n";
 import { supabase, type ProfileRecord } from "./lib/supabaseClient";
 import type { User } from "@supabase/supabase-js";
 
@@ -354,10 +354,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         avatar_url: newRecord.avatar_url,
         created_at: newRecord.created_at,
       })
-      .then(({ error }) => {
+      .then(({ error }: any) => {
         if (error) console.warn("Supabase profile sync notice:", error.message);
-      })
-      .catch(() => {});
+      }, () => {});
 
     return newRecord;
   };
@@ -396,7 +395,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       kycStatus, setKycStatus,
       authModal, setAuthModal,
       lang, setLang,
-      t: translations[lang],
+      t: getTranslations(lang),
       dynamicMarketListings, setDynamicMarketListings,
       ticketsListed: ticketsListFn,
       pendingDisputes,
