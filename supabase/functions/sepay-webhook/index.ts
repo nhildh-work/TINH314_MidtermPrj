@@ -55,17 +55,48 @@ Deno.serve(async (req) => {
       const ticketMatch = content.match(/KYQUY\s*(\d+)/i) || content.match(/(\d+)/);
       if (ticketMatch) {
         const ticketId = Number(ticketMatch[1]);
-        // Cập nhật vé thành mở bán
-        await supabase
-          .from("tickets")
-          .update({ status: "available" })
-          .eq("id", ticketId);
 
-        // Cập nhật giao dịch thành công
-        await supabase
+        // Tìm seller_id của vé
+        const { data: tkInfo } = await supabase
+          .from("tickets")
+          .select("seller_id")
+          .eq("id", ticketId)
+          .maybeSingle();
+
+        if (tkInfo?.seller_id) {
+          // Cập nhật tất cả các vé đang chờ cọc của người bán này thành mở bán
+          await supabase
+            .from("tickets")
+            .update({ status: "available" })
+            .eq("seller_id", tkInfo.seller_id)
+            .eq("status", "pending_deposit");
+        } else {
+          await supabase
+            .from("tickets")
+            .update({ status: "available" })
+            .eq("id", ticketId);
+        }
+
+        // Cập nhật hoặc ghi nhận giao dịch thành công
+        const { data: existingTx } = await supabase
           .from("transactions")
-          .update({ status: "paid" })
-          .eq("ticket_id", ticketId);
+          .select("id")
+          .eq("ticket_id", ticketId)
+          .maybeSingle();
+
+        if (existingTx?.id) {
+          await supabase
+            .from("transactions")
+            .update({ status: "paid" })
+            .eq("id", existingTx.id);
+        } else {
+          await supabase.from("transactions").insert({
+            ticket_id: ticketId,
+            reference_code: `SAFEPASS KYQUY ${ticketId}`,
+            status: "paid",
+            amount: transferAmount,
+          });
+        }
 
         processed++;
         console.log(`✅ Đã xác nhận đóng cọc ký quỹ cho vé #${ticketId}`);

@@ -5,7 +5,7 @@ import { supabase } from "../lib/supabaseClient";
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 export default function NewListing() {
-  const { nav, currentUser, currentProfile } = useApp();
+  const { nav, currentUser, currentProfile, openCheckout } = useApp();
 
   const [eventName, setEventName] = useState("");
   const [eventDate, setEventDate] = useState("");
@@ -21,7 +21,6 @@ export default function NewListing() {
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
   const activeUserId = currentUser?.id || currentProfile?.id;
   const depositPerTicket = Math.round(pricePerTicket * 0.25);
@@ -68,14 +67,32 @@ export default function NewListing() {
         city: city.trim(),
         tier: quantity > 1 ? `${fullTier} (Vé #${idx + 1})` : fullTier,
         price: Number(pricePerTicket),
-        status: "available",
+        status: "pending_deposit",
         created_at: new Date().toISOString(),
       }));
 
-      const { error } = await supabase.from("tickets").insert(ticketsToInsert);
+      const { data: inserted, error } = await supabase
+        .from("tickets")
+        .insert(ticketsToInsert)
+        .select();
+
       if (error) throw error;
 
-      setSuccess(true);
+      if (inserted && inserted.length > 0) {
+        const firstTicket = inserted[0];
+        // 🚀 BẬT NGAY POPUP CHUYỂN KHOẢN CỌC KÝ QUỸ 25% QUA SEPAY / VIETQR
+        openCheckout({
+          id: firstTicket.id,
+          eventTitle: eventName.trim(),
+          eventImage: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop&auto=format",
+          tier: `${fullTier} (Cọc 25%)`,
+          price: totalDeposit,
+          city: city.trim(),
+          venue: venue.trim(),
+          eventDate: eventDate,
+          isDeposit: true, // LUỒNG ĐÓNG CỌC 25%
+        });
+      }
     } catch (err: any) {
       console.error("Lỗi khi đăng bán vé:", err);
       setErrorMsg(err.message || "Không thể đăng bán vé. Vui lòng thử lại!");
@@ -83,66 +100,6 @@ export default function NewListing() {
       setLoading(false);
     }
   };
-
-  if (success) {
-    return (
-      <div className="max-w-xl mx-auto px-5 py-20 text-center space-y-6">
-        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center mx-auto text-4xl animate-bounce">
-          🎉
-        </div>
-        <div>
-          <h2 className="font-display font-800 text-white text-2xl">Đăng Bán Vé Thành Công!</h2>
-          <p className="text-sm text-gray-300 mt-2 leading-relaxed">
-            Bạn đã đăng bán thành công <strong className="text-emerald-400">{quantity} vé</strong> cho sự kiện{" "}
-            <strong className="text-purple-300">{eventName}</strong>.
-          </p>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 text-xs text-left space-y-2 max-w-md mx-auto">
-          <div className="flex justify-between">
-            <span className="text-gray-400">Sự kiện:</span>
-            <span className="font-bold text-white">{eventName}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Thành phố:</span>
-            <span className="text-gray-200">{city}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Số lượng:</span>
-            <span className="font-bold text-emerald-400">{quantity} vé</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Đơn giá:</span>
-            <span className="font-bold text-purple-300">{fmt(pricePerTicket)} / vé</span>
-          </div>
-          <div className="flex justify-between border-t border-white/10 pt-2">
-            <span className="text-gray-400">Tổng tiền cọc ký quỹ (25%):</span>
-            <span className="font-bold text-amber-300">{fmt(totalDeposit)}</span>
-          </div>
-        </div>
-
-        <div className="flex justify-center gap-3 pt-2">
-          <button
-            onClick={() => {
-              setSuccess(false);
-              setEventName("");
-              setQuantity(1);
-              setQrFile(null);
-            }}
-            className="sp-btn-ghost px-6 py-3 font-display font-700 text-xs cursor-pointer"
-          >
-            + Đăng bán thêm vé
-          </button>
-          <button
-            onClick={() => nav("seller-dash")}
-            className="sp-btn-primary px-8 py-3 font-display font-700 text-xs cursor-pointer shadow-lg"
-          >
-            Vào Bảng Điều Khiển Quản Lý →
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-3xl mx-auto px-5 py-8 space-y-6">
@@ -257,7 +214,7 @@ export default function NewListing() {
             <input
               type="number"
               value={pricePerTicket}
-              step={1000}
+              step="any"
               min={1}
               onChange={e => setPricePerTicket(Number(e.target.value))}
               className="sp-input font-display font-800 text-emerald-400 text-base"

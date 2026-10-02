@@ -14,8 +14,8 @@ interface AppCtx {
   addToCart: () => void;
   selectedEvent: EventData | null;
   setSelectedEvent: (e: EventData | null) => void;
-  checkoutTicket: TicketListing | null;
-  openCheckout: (t: TicketListing) => void;
+  checkoutTicket: any;
+  openCheckout: (t: any) => void;
   closeCheckout: () => void;
   disputeTicket: MyTicket | null;
   openDispute: (t: MyTicket) => void;
