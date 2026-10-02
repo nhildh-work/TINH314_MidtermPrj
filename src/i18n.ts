@@ -67,12 +67,20 @@ export const rawTranslations = {
     submitListing: "Xác nhận đăng bán và ký quỹ",
 
     // MyTickets & Gate
+    myTickets: "Vé Của Tôi",
+    backToMarket: "← Về Chợ Vé",
+    loginToSeeTickets: "Vui lòng đăng nhập để xem vé của bạn",
     checkinHint: "Nhấn xác nhận sau khi quét mã thành công tại cổng soát vé sự kiện.",
     checkinBtn: "✓ Xác nhận đã vào cổng an toàn",
+    reportBtn: "🚨 Khiếu nại vé lỗi tại cổng (Fast-Track Escrow)",
+    reportedStatus: "Đang khiếu nại tại cổng",
+    completedMsg: "Đã vào cổng thành công!",
     noTicketsYet: "Bạn chưa mua vé nào trên sàn SafePass.",
     goShop: "Khám phá sự kiện ngay",
     tierLabel2: "Hạng vé",
     pricePaid: "Giá thanh toán",
+    timeLabel: "Thời gian",
+    venueLabel: "Địa điểm",
 
     // Seller Dashboard
     cancelledListing: "Đã hủy đăng bán",
@@ -101,6 +109,19 @@ export const rawTranslations = {
     colDetail: "Chi tiết",
 
     // Dispute & Reports
+    reportPageTitle: "Khiếu Nại Sự Cố Cổng Vé (Escrow Protection)",
+    disputeSafetyTitle: "Bảo vệ dòng tiền qua SafePass Escrow",
+    disputeSafetyDesc: "Khi gửi khiếu nại, tiền thanh toán và 25% cọc người bán sẽ bị phong tỏa bảo vệ quyền lợi cho bạn.",
+    claimDetails: "1. Chi tiết sự cố tại cổng vé",
+    claimTypeLabel: "Loại sự cố",
+    claimTypePh: "Chọn loại sự cố...",
+    disputeReasons: [
+      "Vé bị báo đã quét trước đó (Trùng mã)",
+      "Mã QR không hợp lệ / Vé giả mạo",
+      "Sai vị trí chỗ ngồi / Bị hủy vé",
+      "Sự cố kỹ thuật khác tại cổng"
+    ],
+    submitReport: "Gửi Báo Cáo & Yêu Cầu Hoàn Tiền 100% →",
     reportSentTitle: "Yêu cầu khiếu nại đã được ghi nhận!",
     reportSentDesc: "Hệ thống SafePass đã đóng băng số tiền **tạm giữ** của giao dịch này để bảo vệ quyền lợi của bạn.",
     reportSentSub: "Bộ phận hỗ trợ và người bán sẽ nhận được thông báo để xử lý đối soát.",
@@ -186,12 +207,20 @@ export const rawTranslations = {
     uploadMapSub: "Supports PNG, JPG",
     changeFile: "Change File",
     submitListing: "Confirm & Escrow",
+    myTickets: "My Tickets",
+    backToMarket: "← Back to Market",
+    loginToSeeTickets: "Please log in to see your tickets",
     checkinHint: "Confirm after successfully scanning your pass at the gate.",
     checkinBtn: "✓ Confirm Safe Entry",
+    reportBtn: "🚨 Report Gate Issue (Fast-Track Escrow)",
+    reportedStatus: "Reported at Gate",
+    completedMsg: "Checked in successfully!",
     noTicketsYet: "You have not purchased any tickets yet.",
     goShop: "Explore Events",
     tierLabel2: "Tier",
     pricePaid: "Paid Amount",
+    timeLabel: "Time",
+    venueLabel: "Venue",
     cancelledListing: "Listing Cancelled",
     cancelListing: "Cancel Listing",
     lockedNoCancel: "Ticket is in active trade.",
@@ -216,6 +245,19 @@ export const rawTranslations = {
     colDate: "Date",
     colStatus: "Status",
     colDetail: "Details",
+    reportPageTitle: "Gate Dispute (Escrow Protection)",
+    disputeSafetyTitle: "SafePass Escrow Protection",
+    disputeSafetyDesc: "Buyer funds and 25% seller deposit are frozen immediately.",
+    claimDetails: "1. Incident Details",
+    claimTypeLabel: "Issue Type",
+    claimTypePh: "Select issue...",
+    disputeReasons: [
+      "Ticket already scanned (Duplicate)",
+      "Invalid QR code / Counterfeit",
+      "Wrong seat location / Cancelled",
+      "Other gate technical issue"
+    ],
+    submitReport: "Submit Report & Claim 100% Refund →",
     reportSentTitle: "Dispute request submitted!",
     reportSentDesc: "Funds are held safely in escrow while under review.",
     reportSentSub: "Our support and seller have been notified.",
@@ -251,7 +293,6 @@ export function getTranslations(lang: Lang): T {
       if (prop in target) {
         const val = target[prop];
         if (typeof val === "string") {
-          // If a string property is called as a function like val("arg1", "arg2"), safely return the string
           const callableString: any = function(...args: any[]) {
             return val;
           };
@@ -263,7 +304,6 @@ export function getTranslations(lang: Lang): T {
         }
         return val;
       }
-      // Return a universal callable string fallback to prevent "is not a function" and undefined rendering issues
       const fallbackFn: any = (...args: any[]) => (args.length > 0 && args[0] !== undefined ? String(args[0]) : "");
       fallbackFn.toString = () => "";
       fallbackFn.valueOf = () => "";

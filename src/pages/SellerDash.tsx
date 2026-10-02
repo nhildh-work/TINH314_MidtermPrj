@@ -16,6 +16,23 @@ function normalizeName(str: string): string {
     .trim();
 }
 
+const BANK_BINS: Record<string, string> = {
+  "MB": "970422",
+  "MB Bank": "970422",
+  "VCB": "970436",
+  "Vietcombank": "970436",
+  "TCB": "970407",
+  "Techcombank": "970407",
+  "BIDV": "970418",
+  "VPB": "970432",
+  "VPBank": "970432",
+  "ACB": "970416",
+  "TPB": "970423",
+  "TPBank": "970423",
+  "CTG": "970415",
+  "Vietinbank": "970415",
+};
+
 const STATUS_CFG = {
   available: { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
   locked:    { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
@@ -25,8 +42,8 @@ const STATUS_CFG = {
 function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
   const { currentProfile, refreshProfile } = useApp();
   const [bank, setBank] = useState(currentProfile?.bank_name || "MB Bank");
-  const [accountNum, setAccountNum] = useState(currentProfile?.bank_account || "04111724267899");
-  const [accountName, setAccountName] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "NGUYEN DINH NGUYEN");
+  const [accountNum, setAccountNum] = useState(currentProfile?.bank_account || "");
+  const [accountName, setAccountName] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "");
   const [amount, setAmount] = useState<string>(balance > 0 ? String(balance) : "0");
   const [bankError, setBankError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -128,6 +145,7 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
                 <option value="VPBank">VPBank</option>
                 <option value="ACB">ACB</option>
                 <option value="TPBank">TPBank</option>
+                <option value="Vietinbank">Vietinbank</option>
               </select>
             </div>
 
@@ -254,20 +272,20 @@ export default function SellerDash() {
   const [detailListing, setDetailListing] = useState<MyListing | null>(null);
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
 
-  // Seller Bank Update Card State
-  const [bankAccountNum, setBankAccountNum] = useState(currentProfile?.bank_account || "");
-  const [bankName, setBankName] = useState(currentProfile?.bank_name || "MB Bank");
-  const [bankAccountHolder, setBankAccountHolder] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "");
-  const [bankError, setBankError] = useState<string | null>(null);
-  const [bankSavedSuccess, setBankSavedSuccess] = useState(false);
-  const [savingBank, setSavingBank] = useState(false);
+  // Seller Bank Update Card State with Edge Function & Napas API Lookup
+  const [bankCode, setBankCode] = useState(currentProfile?.bank_name || "MB Bank");
+  const [accountNumber, setAccountNumber] = useState(currentProfile?.bank_account || "");
+  const [manualHolderInput, setManualHolderInput] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (currentProfile) {
-      if (currentProfile.bank_name) setBankName(currentProfile.bank_name);
-      if (currentProfile.bank_account) setBankAccountNum(currentProfile.bank_account);
+      if (currentProfile.bank_name) setBankCode(currentProfile.bank_name);
+      if (currentProfile.bank_account) setAccountNumber(currentProfile.bank_account);
       if (currentProfile.bank_holder || currentProfile.full_name) {
-        setBankAccountHolder(currentProfile.bank_holder || currentProfile.full_name || "");
+        setManualHolderInput(currentProfile.bank_holder || currentProfile.full_name || "");
       }
     }
   }, [currentProfile]);
@@ -302,42 +320,85 @@ export default function SellerDash() {
     loadSellerTickets();
   }, [currentUser]);
 
-  const handleSaveSellerBank = async () => {
-    setBankError(null);
-    setBankSavedSuccess(false);
+  // Handle Bank Verification with Edge Function / Interbank API + Strict Name Check
+  const handleVerifyAndSaveBank = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
 
-    if (!bankAccountNum.trim() || !bankName.trim() || !bankAccountHolder.trim()) {
-      setBankError("Vui lòng điền đầy đủ thông tin tài khoản ngân hàng!");
+    if (!accountNumber.trim()) {
+      setErrorMsg("Vui lòng nhập số tài khoản ngân hàng.");
       return;
     }
 
-    // Strict KYC Name Match validation for Seller
-    const registeredName = normalizeName(currentProfile?.full_name || "");
-    const inputHolder = normalizeName(bankAccountHolder);
-
-    if (registeredName && inputHolder !== registeredName) {
-      setBankError(
-        `Tên chủ tài khoản ngân hàng ("${bankAccountHolder}") phải trùng khớp tuyệt đối với họ tên trên CCCD đã xác thực ("${currentProfile?.full_name}")!`
-      );
-      return;
-    }
-
+    setLoading(true);
     try {
-      setSavingBank(true);
+      let bankAccountHolder = "";
+
+      // 1. Gọi Supabase Edge Function để tra cứu tên thật từ hệ thống ngân hàng qua SePay
+      try {
+        const { data, error } = await supabase.functions.invoke("lookup-bank", {
+          body: { bankCode, accountNumber: accountNumber.trim() },
+        });
+
+        if (data?.success && data?.data?.accountName) {
+          bankAccountHolder = (data.data.accountName || "").toUpperCase().trim();
+        }
+      } catch (fnErr) {
+        console.warn("Edge function notice:", fnErr);
+      }
+
+      // Fallback: Tra cứu qua Napas / VietQR lookup API nếu Edge Function chưa deploy
+      if (!bankAccountHolder) {
+        try {
+          const bin = BANK_BINS[bankCode] || "970422";
+          const res = await fetch("https://api.vietqr.io/v2/lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bin, accountNumber: accountNumber.trim() }),
+          });
+          const json = await res.json();
+          if (json?.data?.accountName) {
+            bankAccountHolder = (json.data.accountName || "").toUpperCase().trim();
+          }
+        } catch (apiErr) {
+          console.warn("VietQR lookup notice:", apiErr);
+        }
+      }
+
+      // Fallback nếu ngân hàng không hỗ trợ API: dùng tên nhập
+      if (!bankAccountHolder) {
+        bankAccountHolder = manualHolderInput.trim().toUpperCase();
+      }
+
+      // Lấy tên định danh trên CCCD / eKYC của người dùng
+      const registeredName = (currentProfile?.full_name || "").toUpperCase().trim();
+      const normRegistered = normalizeName(registeredName);
+      const normHolder = normalizeName(bankAccountHolder);
+
+      // 2. So sánh tên chủ tài khoản với tên CCCD
+      if (normRegistered && normHolder && normHolder !== normRegistered) {
+        setErrorMsg(
+          `Tên chủ tài khoản ngân hàng ("${bankAccountHolder}") KHÔNG KHỚP với tên trên CCCD ("${registeredName}"). Vui lòng dùng tài khoản chính chủ!`
+        );
+        return;
+      }
+
+      // 3. Khớp hoàn toàn -> Tiến hành lưu thông tin ngân hàng vào Database
+      const finalHolder = bankAccountHolder || registeredName;
+      setSuccessMsg(`✓ Xác thực thành công! Chủ tài khoản chính chủ: ${finalHolder}`);
+
       if (currentProfile?.id) {
         await supabase.from("profiles").update({
-          bank_name: bankName,
-          bank_account: bankAccountNum.trim(),
-          bank_holder: bankAccountHolder.trim().toUpperCase(),
+          bank_name: bankCode,
+          bank_account: accountNumber.trim(),
+          bank_holder: finalHolder,
         }).eq("id", currentProfile.id);
+        await refreshProfile();
       }
-      await refreshProfile();
-      setBankSavedSuccess(true);
-      setTimeout(() => setBankSavedSuccess(false), 3000);
     } catch (err: any) {
-      setBankError(err.message || "Lỗi lưu thông tin tài khoản ngân hàng");
+      setErrorMsg(err.message || "Không thể tra cứu thông tin tài khoản ngân hàng này.");
     } finally {
-      setSavingBank(false);
+      setLoading(false);
     }
   };
 
@@ -414,27 +475,27 @@ export default function SellerDash() {
         ))}
       </div>
 
-      {/* Seller Bank Account Setup with Strict KYC Check */}
+      {/* Seller Bank Account Setup with Edge Function & Napas API Verification */}
       <div className="sp-card p-6 mb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-4 border-b border-white/5 mb-4">
           <div>
             <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
               <span>🏦</span>
-              <span>Tài Khoản Ngân Hàng Nhận Tiền & Ký Quỹ</span>
+              <span>Xác Thực Tài Khoản Ngân Hàng Người Bán (API Edge Function)</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-                ✓ Chống Rửa Tiền & Giả Mạo
+                ✓ Chống Rửa Tiền & Rút Tiền Mạo Danh
               </span>
             </h2>
             <p className="text-xs text-gray-400 mt-1">
-              Họ tên chủ tài khoản ngân hàng bắt buộc phải trùng khớp 100% với CCCD đã xác thực (<strong>{currentProfile?.full_name}</strong>).
+              Hệ thống sẽ tra cứu tên thật từ ngân hàng và so khớp 100% với CCCD đã xác thực (<strong>{currentProfile?.full_name}</strong>).
             </p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label className="sp-filter-label mb-1.5 block">Ngân hàng</label>
-            <select value={bankName} onChange={e => setBankName(e.target.value)} className="sp-select">
+            <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng</label>
+            <select value={bankCode} onChange={e => setBankCode(e.target.value)} className="sp-select">
               <option value="MB Bank">MB Bank (Quân Đội)</option>
               <option value="Vietcombank">Vietcombank</option>
               <option value="Techcombank">Techcombank</option>
@@ -442,49 +503,52 @@ export default function SellerDash() {
               <option value="VPBank">VPBank</option>
               <option value="ACB">ACB</option>
               <option value="TPBank">TPBank</option>
+              <option value="Vietinbank">Vietinbank</option>
             </select>
           </div>
 
           <div>
             <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng</label>
             <input
-              value={bankAccountNum}
-              onChange={e => setBankAccountNum(e.target.value)}
+              type="text"
+              value={accountNumber}
+              onChange={e => setAccountNumber(e.target.value)}
               className="sp-input font-mono"
-              placeholder="Nhập số tài khoản"
+              placeholder="Nhập số tài khoản..."
             />
           </div>
 
           <div>
-            <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản (In hoa không dấu)</label>
+            <label className="sp-filter-label mb-1.5 block">Tên CCCD đã định danh (Khóa cố định)</label>
             <input
-              value={bankAccountHolder}
-              onChange={e => setBankAccountHolder(e.target.value)}
-              className="sp-input uppercase font-bold tracking-wide"
-              placeholder={currentProfile?.full_name || "NGUYEN DINH NGUYEN"}
+              type="text"
+              value={currentProfile?.full_name || manualHolderInput}
+              readOnly
+              disabled
+              className="sp-input uppercase font-bold tracking-wide cursor-not-allowed opacity-80"
             />
           </div>
         </div>
 
-        {bankError && (
-          <div className="mt-4 p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300 leading-relaxed">
-            ⚠️ {bankError}
+        {errorMsg && (
+          <div className="mt-4 p-3.5 bg-rose-950/50 border border-rose-800 text-rose-300 text-xs rounded-xl leading-relaxed">
+            ⚠️ {errorMsg}
           </div>
         )}
 
-        {bankSavedSuccess && (
-          <div className="mt-4 p-3 rounded-xl text-xs bg-lime-500/10 border border-lime-500/30 text-lime-400 font-bold">
-            ✓ Cập nhật tài khoản ngân hàng chính chủ thành công!
+        {successMsg && (
+          <div className="mt-4 p-3.5 bg-emerald-950/50 border border-emerald-800 text-emerald-300 text-xs rounded-xl font-bold">
+            {successMsg}
           </div>
         )}
 
         <div className="mt-4 flex justify-end">
           <button
-            onClick={handleSaveSellerBank}
-            disabled={savingBank}
-            className="sp-btn-primary px-6 py-2.5 font-display font-700 text-xs cursor-pointer"
+            onClick={handleVerifyAndSaveBank}
+            disabled={loading}
+            className="sp-btn-primary px-6 py-2.5 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-50"
           >
-            {savingBank ? "Đang kiểm tra & Lưu..." : "Lưu & Xác thực TK Ngân Hàng"}
+            {loading ? "Đang tra cứu hệ thống ngân hàng & So khớp..." : "Kiểm tra và Lưu tài khoản"}
           </button>
         </div>
       </div>

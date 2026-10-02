@@ -32,11 +32,33 @@ Deno.serve(async (req) => {
 
   for (const transfer of transfers) {
     const transferAmount = transfer.transferAmount as number;
-    const content = transfer.content as string | undefined;
+    const content = (transfer.content as string | undefined) ?? "";
 
     if (!content) continue;
 
-    // Extract reference code matching SePay format (e.g. SP123456 or SP-123456)
+    const upperContent = content.toUpperCase();
+
+    // 1. Thêm xử lý nội dung chuyển khoản Ký Quỹ (VD: SAFEPASS KYQUY <user_id>)
+    if (upperContent.includes("SAFEPASS") && upperContent.includes("KYQUY")) {
+      const parts = upperContent.split("KYQUY");
+      if (parts[1]) {
+        const userId = parts[1].trim().split(" ")[0];
+        const { error: updateProfileErr } = await supabase
+          .from("profiles")
+          .update({ role: "seller" }) // Cập nhật quyền seller khi nạp ký quỹ thành công
+          .eq("id", userId);
+
+        if (!updateProfileErr) {
+          processed++;
+          console.log(`✅ Confirmed deposit for user ${userId}`);
+          continue;
+        } else {
+          console.error(`Failed to update profile for user ${userId}:`, updateProfileErr);
+        }
+      }
+    }
+
+    // 2. Logic gốc xử lý thanh toán mua vé qua mã SP-...
     const match = content.match(/SP-?(\d{3,10})/i);
     if (!match) continue;
     const digits = match[1];
