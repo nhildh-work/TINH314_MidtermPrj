@@ -5,34 +5,6 @@ import { supabase } from "../lib/supabaseClient";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
-function normalizeName(str: string): string {
-  return str
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .trim();
-}
-
-const BANK_BINS: Record<string, string> = {
-  "MB": "970422",
-  "MB Bank": "970422",
-  "VCB": "970436",
-  "Vietcombank": "970436",
-  "TCB": "970407",
-  "Techcombank": "970407",
-  "BIDV": "970418",
-  "VPB": "970432",
-  "VPBank": "970432",
-  "ACB": "970416",
-  "TPB": "970423",
-  "TPBank": "970423",
-  "CTG": "970415",
-  "Vietinbank": "970415",
-};
-
 const STATUS_CFG = {
   available: { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
   locked:    { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
@@ -42,7 +14,7 @@ const STATUS_CFG = {
 
 function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
   const { currentProfile, refreshProfile } = useApp();
-  const [bank, setBank] = useState(currentProfile?.bank_name || "MB Bank");
+  const [bank, setBank] = useState(currentProfile?.bank_name || "Vietcombank");
   const [accountNum, setAccountNum] = useState(currentProfile?.bank_account || "");
   const [accountName, setAccountName] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "");
   const [amount, setAmount] = useState<string>(balance > 0 ? String(balance) : "0");
@@ -59,16 +31,6 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
       return;
     }
 
-    const registeredName = normalizeName(currentProfile?.full_name || "");
-    const inputHolder = normalizeName(accountName);
-
-    if (registeredName && inputHolder !== registeredName) {
-      setBankError(
-        `Tên chủ tài khoản ngân hàng ("${accountName}") phải trùng khớp tuyệt đối với họ tên trên CCCD đã xác thực ("${currentProfile?.full_name}")!`
-      );
-      return;
-    }
-
     if (numAmount <= 0 || numAmount > balance) {
       setBankError("Số tiền rút không hợp lệ hoặc vượt quá số dư khả dụng!");
       return;
@@ -78,12 +40,12 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
       try {
         await supabase.from("profiles").update({
           bank_name: bank,
-          bank_account: accountNum,
-          bank_holder: accountName,
+          bank_account: accountNum.trim(),
+          bank_holder: accountName.trim().toUpperCase(),
         }).eq("id", currentProfile.id);
         await refreshProfile();
       } catch (e) {
-        console.warn("Notice updating seller bank:", e);
+        console.warn("Lỗi lưu thông tin rút tiền:", e);
       }
     }
 
@@ -92,11 +54,11 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
 
   if (confirmed) return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }}>
-      <div className="sp-card p-8 max-w-md w-full text-center">
-        <div className="text-5xl mb-3">✅</div>
-        <h2 className="font-display font-800 text-white text-xl mb-1">Yêu cầu rút tiền đã được gửi!</h2>
-        <p className="text-sm mb-5 text-gray-300">
-          Số tiền <strong className="text-emerald-400">{fmt(numAmount)}</strong> sẽ được giải ngân vào tài khoản chính chủ {bank} ({accountNum} - {accountName}) của bạn trong vòng 1-2 giờ làm việc.
+      <div className="sp-card p-8 max-w-md w-full text-center space-y-4">
+        <div className="text-5xl">✅</div>
+        <h2 className="font-display font-800 text-white text-xl">Yêu cầu rút tiền đã được gửi!</h2>
+        <p className="text-sm text-gray-300 leading-relaxed">
+          Số tiền <strong className="text-emerald-400">{fmt(numAmount)}</strong> sẽ được chuyển vào tài khoản {bank} ({accountNum} - {accountName}) của bạn trong vòng 1-2 giờ làm việc.
         </p>
         <button onClick={onClose} className="sp-btn-primary w-full py-3 font-display font-700 cursor-pointer">
           Đóng
@@ -111,17 +73,17 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
         <div className="flex items-center justify-between pb-3 border-b border-white/5 mb-4">
           <div>
             <h2 className="font-display font-800 text-white text-lg">Rút Tiền Về Ngân Hàng</h2>
-            <p className="text-[11px] text-purple-400">Yêu cầu tên chủ TK trùng khớp với CCCD</p>
+            <p className="text-[11px] text-purple-400">Rút tiền trực tiếp từ số dư khả dụng</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">✕</button>
         </div>
 
         {isZero ? (
-          <div className="text-center py-6">
-            <div className="text-4xl mb-3">💰</div>
-            <p className="font-display font-700 text-white text-base mb-1">Số dư khả dụng: 0 VND</p>
-            <p className="text-xs text-gray-400 mb-6 leading-relaxed">
-              Bạn chưa có vé nào hoàn tất giao dịch. Khi có người mua vé và hoàn tất sự kiện, tiền vé (95%) cùng 100% tiền cọc ký quỹ (25%) sẽ tự động chuyển vào số dư khả dụng để bạn rút về tài khoản.
+          <div className="text-center py-6 space-y-3">
+            <div className="text-4xl">💰</div>
+            <p className="font-display font-700 text-white text-base">Số dư khả dụng: 0 VND</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Bạn chưa có vé nào hoàn tất giao dịch. Khi vé bán thành công và sự kiện diễn ra, tiền sẽ chuyển vào số dư để bạn rút.
             </p>
             <button onClick={onClose} className="sp-btn-ghost px-6 py-2.5 font-display font-700 cursor-pointer">
               Đã hiểu
@@ -130,15 +92,15 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
         ) : (
           <div className="space-y-4">
             <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 flex justify-between items-center text-xs">
-              <span className="text-gray-300">Số dư khả dụng có thể rút:</span>
+              <span className="text-gray-300">Số dư có thể rút:</span>
               <span className="font-display font-800 text-emerald-400 text-sm">{fmt(balance)}</span>
             </div>
 
             <div>
               <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng *</label>
               <select value={bank} onChange={e => setBank(e.target.value)} className="sp-select">
-                <option value="MB Bank">MB Bank (Quân Đội)</option>
                 <option value="Vietcombank">Vietcombank</option>
+                <option value="MB Bank">MB Bank (Quân Đội)</option>
                 <option value="Techcombank">Techcombank</option>
                 <option value="BIDV">BIDV</option>
                 <option value="VPBank">VPBank</option>
@@ -159,19 +121,13 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
             </div>
 
             <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <label className="sp-filter-label">Tên chủ tài khoản (Khớp 100% CCCD) *</label>
-                <span className="text-[10px] text-amber-400 font-semibold">🔒 Bắt buộc trùng CCCD</span>
-              </div>
+              <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản *</label>
               <input
                 value={accountName}
                 onChange={e => setAccountName(e.target.value)}
                 className="sp-input uppercase font-bold tracking-wide"
-                placeholder={currentProfile?.full_name || "NGUYEN DINH NGUYEN"}
+                placeholder="Tên chủ tài khoản"
               />
-              <p className="text-[10px] text-gray-500 mt-1">
-                Tên đăng ký trên CCCD: <strong className="text-gray-300">{currentProfile?.full_name || "Chưa định danh"}</strong>
-              </p>
             </div>
 
             <div>
@@ -186,7 +142,7 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
             </div>
 
             {bankError && (
-              <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300 leading-relaxed">
+              <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
                 ⚠️ {bankError}
               </div>
             )}
@@ -221,18 +177,13 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
     setErrorMsg(null);
     try {
       await supabase.from("transactions").delete().eq("ticket_id", listing.id);
-
-      const { error } = await supabase
-        .from("tickets")
-        .delete()
-        .eq("id", listing.id);
-
+      const { error } = await supabase.from("tickets").delete().eq("id", listing.id);
       if (error) throw error;
 
       onDeleted(listing.id);
       onClose();
     } catch (err: any) {
-      setErrorMsg(err.message || "Không thể hủy và xóa niêm yết vé.");
+      setErrorMsg(err.message || "Không thể hủy niêm yết vé.");
       setLoading(false);
     }
   };
@@ -276,20 +227,19 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
           <button
             onClick={handleDeleteListing}
             disabled={loading}
-            className="w-full py-3 rounded-xl font-display font-700 text-sm transition-all cursor-pointer disabled:opacity-50"
+            className="w-full py-3 rounded-xl font-display font-700 text-sm cursor-pointer disabled:opacity-50"
             style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)", color: "#F87171" }}
           >
             {loading ? "Đang xử lý..." : "Hủy và xóa niêm yết vé"}
           </button>
         ) : (
           <p className="text-xs text-center text-gray-400">
-            {listing.status === "locked" ? "Vé đang được giao dịch (Tạm khóa, không thể hủy)." : "Vé đã bán hoặc bị khiếu nại, không thể hủy."}
+            {listing.status === "locked" ? "Vé đang giao dịch, không thể hủy." : "Vé đã bán hoặc đang tranh chấp, không thể hủy."}
           </p>
         )}
       </div>
-    </div>
-  );
-}
+    );
+  }
 
 export default function SellerDash() {
   const { nav, kycStatus, currentProfile, currentUser, refreshProfile, t } = useApp();
@@ -298,14 +248,23 @@ export default function SellerDash() {
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
   const [sellerDisputes, setSellerDisputes] = useState<any[]>([]);
 
-  const [bankCode, setBankCode] = useState(currentProfile?.bank_name || "MB Bank");
-  const [accountNumber, setAccountNumber] = useState(currentProfile?.bank_account || "");
-  
-  const [fetchedHolder, setFetchedHolder] = useState<string>("");
-  const [isLookingUp, setIsLookingUp] = useState<boolean>(false);
+  // FORM TÀI KHOẢN NGÂN HÀNG NHẬP TAY
+  const [bankName, setBankName] = useState("Vietcombank");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountHolder, setAccountHolder] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // ĐỒNG BỘ DỮ LIỆU TỪ CURRENT PROFILE LÊN FORM
+  useEffect(() => {
+    if (currentProfile) {
+      setBankName(currentProfile.bank_name || "Vietcombank");
+      setAccountNumber(currentProfile.bank_account || "");
+      setAccountHolder(currentProfile.bank_holder || currentProfile.full_name || "");
+    }
+  }, [currentProfile]);
 
   useEffect(() => {
     const uid = currentUser?.id;
@@ -325,7 +284,6 @@ export default function SellerDash() {
             eventTitle: t.event_name,
             tier: t.tier || "Standard",
             price: Number(t.price),
-            // Đóng băng ĐỘC LẬP vé bị disputed, vé completed khác vẫn hoàn toàn bình thường
             status: t.status === "disputed" ? "disputed" : t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
             date: t.event_date || "Sắp diễn ra",
           }));
@@ -339,7 +297,7 @@ export default function SellerDash() {
 
         if (disData) setSellerDisputes(disData);
       } catch (err) {
-        console.error("Lỗi khi tải vé người bán từ Supabase:", err);
+        console.error("Lỗi khi tải dữ liệu người bán:", err);
       }
     }
 
@@ -347,13 +305,9 @@ export default function SellerDash() {
 
     const channel = supabase
       .channel("seller_realtime_channel")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "tickets" },
-        () => {
-          loadSellerTickets();
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, () => {
+        loadSellerTickets();
+      })
       .subscribe();
 
     return () => {
@@ -361,109 +315,34 @@ export default function SellerDash() {
     };
   }, [currentUser]);
 
-  useEffect(() => {
-    if (currentProfile) {
-      if (currentProfile.bank_name) setBankCode(currentProfile.bank_name);
-      if (currentProfile.bank_account) setAccountNumber(currentProfile.bank_account);
-    }
-  }, [currentProfile]);
-
-  useEffect(() => {
-    const trimmedAcc = accountNumber.trim();
-    if (!trimmedAcc || trimmedAcc.length < 6) {
-      setFetchedHolder("");
-      setErrorMsg(null);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setIsLookingUp(true);
-      setErrorMsg(null);
-      setFetchedHolder("");
-
-      try {
-        let name = "";
-        try {
-          const { data } = await supabase.functions.invoke("lookup-bank", {
-            body: { bankCode, accountNumber: trimmedAcc },
-          });
-          if (data?.success && data?.data?.accountName) {
-            name = data.data.accountName;
-          }
-        } catch (fnErr) {
-          console.warn("Edge function lookup notice:", fnErr);
-        }
-
-        if (!name) {
-          try {
-            const bin = BANK_BINS[bankCode] || "970422";
-            const res = await fetch("https://api.vietqr.io/v2/lookup", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ bin, accountNumber: trimmedAcc }),
-            });
-            const json = await res.json();
-            if (json?.data?.accountName) {
-              name = json.data.accountName;
-            }
-          } catch (apiErr) {
-            console.warn("VietQR lookup notice:", apiErr);
-          }
-        }
-
-        if (!name) {
-          setErrorMsg("Không thể tra cứu thông tin từ ngân hàng. Vui lòng kiểm tra lại số tài khoản!");
-          setFetchedHolder("");
-          return;
-        }
-
-        const upperName = name.toUpperCase().trim();
-        setFetchedHolder(upperName);
-
-        const registeredName = (currentProfile?.full_name || "").toUpperCase().trim();
-        const normReg = normalizeName(registeredName);
-        const normHolder = normalizeName(upperName);
-
-        if (normReg && normHolder && normHolder !== normReg) {
-          setErrorMsg(`Tên chủ tài khoản ngân hàng thực tế ("${upperName}") KHÔNG KHỚP với tên trên CCCD ("${registeredName}"). Chống mạo danh tuyệt đối!`);
-        }
-      } catch (err) {
-        setErrorMsg("Lỗi kết nối tra cứu ngân hàng. Vui lòng thử lại.");
-      } finally {
-        setIsLookingUp(false);
-      }
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [accountNumber, bankCode, currentProfile?.full_name]);
-
-  const handleVerifyAndSaveBank = async () => {
+  // HÀM LƯU TÀI KHOẢN NGÂN HÀNG (LƯU VÀO SUPABASE & ĐỒNG BỘ TỨC THÌ)
+  const handleSaveBankInfo = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    const registeredName = (currentProfile?.full_name || "").toUpperCase().trim();
-    const normRegistered = normalizeName(registeredName);
-    const normHolder = normalizeName(fetchedHolder);
-
-    if (!fetchedHolder || normHolder !== normRegistered) {
-      setErrorMsg("Tên chủ tài khoản bắt buộc phải khớp 100% với tên trên CCCD đã định danh để bảo mật chống scam!");
+    if (!accountNumber.trim()) {
+      setErrorMsg("Vui lòng nhập số tài khoản ngân hàng!");
       return;
     }
 
     setLoading(true);
     try {
-      setSuccessMsg(`✓ Xác thực thành công! Chủ tài khoản chính chủ: ${fetchedHolder}`);
-
       if (currentProfile?.id) {
-        await supabase.from("profiles").update({
-          bank_name: bankCode,
+        const holderName = accountHolder.trim().toUpperCase() || (currentProfile.full_name || "").toUpperCase();
+        
+        const { error } = await supabase.from("profiles").update({
+          bank_name: bankName,
           bank_account: accountNumber.trim(),
-          bank_holder: fetchedHolder,
+          bank_holder: holderName,
         }).eq("id", currentProfile.id);
-        await refreshProfile();
+
+        if (error) throw error;
+
+        await refreshProfile(); // Kích hoạt đồng bộ sang Profile View ngay lập tức
+        setSuccessMsg("✓ Đã lưu và đồng bộ tài khoản ngân hàng thành công!");
       }
     } catch (err: any) {
-      setErrorMsg(err.message || "Không thể lưu thông tin tài khoản ngân hàng.");
+      setErrorMsg(err.message || "Lỗi khi lưu thông tin ngân hàng.");
     } finally {
       setLoading(false);
     }
@@ -495,7 +374,6 @@ export default function SellerDash() {
   }
 
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
-  // SỐ DƯ RÚT TIỀN: CHỈ CỘNG TIỀN VÉ THÀNH CÔNG ('completed'). CÁC VÉ 'disputed' BỊ KHÓA RIÊNG KHÔNG ẢNH HƯỞNG
   const soldListings = allSellerListings.filter(l => l.status === "completed");
   const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
 
@@ -504,9 +382,6 @@ export default function SellerDash() {
     { label: "Đang mở bán", value: String(activeCount), icon: "🟢", color: "#A3E635" },
     { label: "Số dư khả dụng để rút", value: fmt(availableBalance), icon: "💰", color: "#10B981" },
   ];
-
-  const registeredName = (currentProfile?.full_name || "").toUpperCase().trim();
-  const isNameMatched = fetchedHolder && normalizeName(fetchedHolder) === normalizeName(registeredName);
 
   return (
     <div className="max-w-[1680px] mx-auto px-5 lg:px-8 py-8">
@@ -519,7 +394,7 @@ export default function SellerDash() {
         />
       )}
 
-      {/* CẢNH BÁO TRANH CHẤP DÀNH CHO NGƯỜI BÁN */}
+      {/* CẢNH BÁO TRANH CHẤP */}
       {sellerDisputes.length > 0 && (
         <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -572,28 +447,24 @@ export default function SellerDash() {
         ))}
       </div>
 
+      {/* FORM NHẬP TAY TÀI KHOẢN NGÂN HÀNG (ĐÃ BỎ HOÀN TOÀN QUÉT API) */}
       <div className="sp-card p-6 mb-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-4 border-b border-white/5 mb-4">
-          <div>
-            <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
-              <span>🏦</span>
-              <span>Xác Thực Tài Khoản Ngân Hàng Người Bán (Live Interbank Tracking)</span>
-              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-                ✓ Bắt buộc khớp 100% tên CCCD chống Scam
-              </span>
-            </h2>
-            <p className="text-xs text-gray-400 mt-1">
-              Gõ số tài khoản để hệ thống tra cứu tên chủ tài khoản từ ngân hàng và so khớp tuyệt đối với CCCD đã định danh (<strong>{registeredName}</strong>).
-            </p>
-          </div>
+        <div className="pb-4 border-b border-white/5 mb-4">
+          <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
+            <span>🏦</span>
+            <span>Tài Khoản Ngân Hàng Nhận Tiền Bán Vé / Hoàn Cọc</span>
+          </h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Tài khoản ngân hàng dùng để SafePass giải ngân tiền bán vé và hoàn trả lại tiền cọc ký quỹ.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng</label>
-            <select value={bankCode} onChange={e => setBankCode(e.target.value)} className="sp-select">
-              <option value="MB Bank">MB Bank (Quân Đội)</option>
+            <select value={bankName} onChange={e => setBankName(e.target.value)} className="sp-select">
               <option value="Vietcombank">Vietcombank</option>
+              <option value="MB Bank">MB Bank (Quân Đội)</option>
               <option value="Techcombank">Techcombank</option>
               <option value="BIDV">BIDV</option>
               <option value="VPBank">VPBank</option>
@@ -604,70 +475,47 @@ export default function SellerDash() {
           </div>
 
           <div>
-            <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng (Gõ để tra cứu)</label>
+            <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng</label>
             <input
               type="text"
               value={accountNumber}
               onChange={e => setAccountNumber(e.target.value)}
               className="sp-input font-mono"
-              placeholder="Nhập số tài khoản..."
+              placeholder="Nhập số tài khoản ngân hàng..."
             />
           </div>
 
           <div>
-            <label className="sp-filter-label mb-1.5 block">Tên CCCD đã định danh (Khóa cố định)</label>
+            <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản (Khớp với người bán)</label>
             <input
               type="text"
-              value={registeredName}
-              readOnly
-              disabled
-              className="sp-input uppercase font-bold tracking-wide cursor-not-allowed opacity-80"
+              value={accountHolder}
+              onChange={e => setAccountHolder(e.target.value)}
+              className="sp-input uppercase font-bold tracking-wide"
+              placeholder="Nhập tên chủ tài khoản..."
             />
           </div>
         </div>
 
-        {accountNumber.trim().length >= 6 && (
-          <div className="mt-4 p-4 rounded-xl bg-gray-950/60 border border-gray-800 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-400 flex items-center gap-1.5">
-                <span>🔍</span>
-                <span>Tên chủ tài khoản tra cứu từ {bankCode}:</span>
-              </span>
-              <span className="font-display font-800 px-3 py-1 rounded-lg bg-gray-900 border border-gray-700 text-amber-300 uppercase">
-                {isLookingUp ? "Đang tra cứu hệ thống..." : (fetchedHolder || "Chưa có kết quả tra cứu")}
-              </span>
-            </div>
-
-            {fetchedHolder && !isLookingUp && (
-              <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-800/60">
-                <span className="text-gray-400">Kết quả so khớp với CCCD:</span>
-                <span className={`font-bold ${isNameMatched ? "text-emerald-400" : "text-rose-400"}`}>
-                  {isNameMatched ? "✓ TRÙNG KHỚP TUYỆT ĐỐI (Chính chủ)" : "❌ KHÔNG TRÙNG KHỚP (Chặn tài khoản mạo danh)"}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
         {errorMsg && (
-          <div className="mt-4 p-3.5 bg-rose-950/50 border border-rose-800 text-rose-300 text-xs rounded-xl leading-relaxed">
+          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded-xl">
             ⚠️ {errorMsg}
           </div>
         )}
 
         {successMsg && (
-          <div className="mt-4 p-3.5 bg-emerald-950/50 border border-emerald-800 text-emerald-300 text-xs rounded-xl font-bold">
+          <div className="mt-4 p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs rounded-xl font-bold">
             {successMsg}
           </div>
         )}
 
         <div className="mt-4 flex justify-end">
           <button
-            onClick={handleVerifyAndSaveBank}
-            disabled={loading || isLookingUp || !isNameMatched}
+            onClick={handleSaveBankInfo}
+            disabled={loading}
             className="sp-btn-primary px-6 py-2.5 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-40"
           >
-            {loading ? "Đang lưu..." : "Kiểm tra và Lưu tài khoản"}
+            {loading ? "Đang lưu..." : "Lưu & Đồng Bộ Tài Khoản Ngân Hàng"}
           </button>
         </div>
       </div>
