@@ -6,16 +6,18 @@ import { PolicyModal } from "../components/PolicyModal";
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 function generateRefCode(ticketId: string | number) {
-  const randomSuffix = Math.floor(100 + Math.random() * 900);
-  return `SP${ticketId}${Date.now().toString().slice(-4)}${randomSuffix}`;
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  return `SP${ticketId}${randomSuffix}`;
 }
 
 export default function CheckoutModal() {
-  const { checkoutTicket, closeCheckout, addToCart, currentUser, addPurchasedTicket, nav } = useApp();
+  const { checkoutTicket, closeCheckout, addToCart, currentUser, currentProfile, addPurchasedTicket, nav } = useApp();
   const [showTerms, setShowTerms] = useState(false);
   const [done, setDone] = useState(false);
-  const [refCode, setRefCode] = useState<string>("");
-  const [qrReady, setQrReady] = useState(false);
+  const [refCode, setRefCode] = useState<string>(() =>
+    checkoutTicket ? generateRefCode(checkoutTicket.id) : ""
+  );
+  const [qrReady, setQrReady] = useState(true);
   const [paymentStatus, setPaymentStatus] = useState<"pending" | "paid">("pending");
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -25,6 +27,8 @@ export default function CheckoutModal() {
 
   // Biến cờ tuyệt đối để phân biệt Luồng Người Bán Đóng Cọc vs Người Mua
   const isDepositTx = checkoutTicket?.isDeposit === true || checkoutTicket?.tier?.includes("Cọc");
+
+  const activeUserId = currentUser?.id || currentProfile?.id || "anonymous-user";
 
   const handleClose = async () => {
     if (paymentStatus === "pending" && refCode && checkoutTicket?.id && !isDepositTx) {
@@ -39,13 +43,16 @@ export default function CheckoutModal() {
   };
 
   useEffect(() => {
-    if (!checkoutTicket || !currentUser) return;
+    if (!checkoutTicket) return;
 
     setDone(false);
     setPaymentStatus("pending");
 
-    const code = generateRefCode(checkoutTicket.id);
-    setRefCode(code);
+    let code = refCode;
+    if (!code) {
+      code = generateRefCode(checkoutTicket.id);
+      setRefCode(code);
+    }
 
     // CHUẨN GIÁ: Đóng cọc = giá gốc (25% đã tính). Mua vé = Giá vé + 5% Phí nền tảng
     const finalAmount = isDepositTx
@@ -65,21 +72,21 @@ export default function CheckoutModal() {
           // Tạo transaction pending mới
           await supabase.from("transactions").insert({
             ticket_id: checkoutTicket.id,
-            buyer_id: currentUser!.id,
+            buyer_id: activeUserId,
             amount: finalAmount,
             status: "pending",
             reference_code: code,
           });
         }
       } catch (err) {
-        console.warn("Lỗi khởi tạo giao dịch:", err);
+        console.warn("Lỗi khởi tạo giao dịch Supabase (vẫn hiển thị mã QR SePay):", err);
       } finally {
         setQrReady(true);
       }
     }
 
     initTransaction();
-  }, [checkoutTicket?.id, currentUser?.id]);
+  }, [checkoutTicket?.id, activeUserId]);
 
   if (!checkoutTicket) return null;
 
@@ -87,7 +94,11 @@ export default function CheckoutModal() {
     ? checkoutTicket.price
     : checkoutTicket.price + Math.round(checkoutTicket.price * 0.05);
 
-  const qrUrl = refCode
+  // URL QR SePay chính thức và VietQR dự phòng
+  const sepayQrUrl = refCode
+    ? `https://qr.sepay.vn/img?acc=04111724267899&bank=MBBank&amount=${total}&des=${refCode}`
+    : "";
+  const vietQrUrl = refCode
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${total}&addInfo=${refCode}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
@@ -102,11 +113,11 @@ export default function CheckoutModal() {
 
       if (checkoutTicket && checkoutTicket.id) {
         if (isDepositTx) {
-          // 🟢 LUỒNG NGƯỜI BÁN ĐÓNG CỌC
+          // 🟢 LUỒNG NGƯỜI BÁN ĐÓNG CỌC: Chuyển vé sang available để bán công khai
           await supabase.from("tickets").update({ status: "available" }).eq("id", checkoutTicket.id);
-          // TUYỆT ĐỐI KHÔNG addPurchasedTicket() VÀO ĐÂY NỮA
+          // TUYỆT ĐỐI KHÔNG addPurchasedTicket() VÀ KHÔNG addToCart() VÀO ĐÂY!
         } else {
-          // 🔵 LUỒNG NGƯỜI MUA MUA VÉ
+          // 🔵 LUỒNG NGƯỜI MUA MUA VÉ: Đánh dấu vé sold và thêm vào vé của tôi
           await supabase.from("tickets").update({ status: "sold" }).eq("id", checkoutTicket.id);
           
           addToCart();
@@ -155,9 +166,9 @@ export default function CheckoutModal() {
               <span className="text-xl">🔒</span>
               <div>
                 <h2 className="font-display font-800 text-white text-lg">
-                  {isDepositTx ? "Thanh Toán Cọc Ký Quỹ Mở Bán" : "Thanh Toán Chuyển Khoản VietQR"}
+                  {isDepositTx ? "Thanh Toán Cọc Ký Quỹ Mở Bán" : "Thanh Toán Chuyển Khoản SePay / VietQR"}
                 </h2>
-                <p className="text-[11px] text-gray-400">Giao dịch được bảo vệ an toàn qua SafePass Escrow</p>
+                <p className="text-[11px] text-gray-400">Giao dịch được bảo vệ an toàn qua SafePass Escrow & SePay Gateway</p>
               </div>
             </div>
             <button onClick={handleClose} className="w-8 h-8 rounded-full text-gray-400 hover:text-white cursor-pointer">✕</button>
@@ -219,11 +230,23 @@ export default function CheckoutModal() {
                 <div className="rounded-2xl p-4 flex flex-col items-center bg-purple-500/5 border border-purple-500/20">
                   <div className="flex items-center gap-1.5 text-xs font-700 text-emerald-400 mb-3 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
                     <span>📱</span>
-                    <span>Quét mã QR bằng App Ngân hàng bất kỳ</span>
+                    <span>Quét mã QR SePay bằng App Ngân hàng bất kỳ</span>
                   </div>
 
                   <div className="relative mb-4 bg-white p-2 rounded-2xl shadow-xl">
-                    <img src={qrUrl} alt="VietQR" className="rounded-xl" style={{ width: 210, height: 210 }} />
+                    <img
+                      src={sepayQrUrl || vietQrUrl}
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.triedFallback) {
+                          target.dataset.triedFallback = "true";
+                          target.src = vietQrUrl;
+                        }
+                      }}
+                      alt="Mã QR Chuyển Khoản SePay"
+                      className="rounded-xl"
+                      style={{ width: 210, height: 210 }}
+                    />
                   </div>
 
                   <div className="w-full rounded-xl p-3.5 bg-black/50 border border-white/8 space-y-2.5 text-xs">
@@ -243,11 +266,16 @@ export default function CheckoutModal() {
                             setCopiedAcc(true);
                             setTimeout(() => setCopiedAcc(false), 2000);
                           }}
-                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-300"
+                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-300 cursor-pointer hover:bg-white/20"
                         >
                           {copiedAcc ? "✓ Đã chép" : "Copy"}
                         </button>
                       </div>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Chủ tài khoản:</span>
+                      <span className="font-700 text-white">NGUYEN DINH NGUYEN</span>
                     </div>
 
                     <div className="flex justify-between items-center">
@@ -261,7 +289,7 @@ export default function CheckoutModal() {
                             setCopiedAmount(true);
                             setTimeout(() => setCopiedAmount(false), 2000);
                           }}
-                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-300"
+                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-300 cursor-pointer hover:bg-white/20"
                         >
                           {copiedAmount ? "✓ Đã chép" : "Copy"}
                         </button>
@@ -279,7 +307,7 @@ export default function CheckoutModal() {
                             setCopiedCode(true);
                             setTimeout(() => setCopiedCode(false), 2000);
                           }}
-                          className="px-2 py-0.5 rounded bg-purple-500/25 text-[10px] text-purple-300"
+                          className="px-2 py-0.5 rounded bg-purple-500/25 text-[10px] text-purple-300 cursor-pointer hover:bg-purple-500/40"
                         >
                           {copiedCode ? "✓ Đã chép" : "Copy"}
                         </button>
@@ -287,10 +315,14 @@ export default function CheckoutModal() {
                     </div>
                   </div>
 
+                  <p className="text-[11px] text-gray-400 text-center mt-2.5">
+                    ⚡ Hệ thống tự động xác nhận qua SePay Webhook khi nhận chuyển khoản
+                  </p>
+
                   <button
                     onClick={handleManualVerify}
                     disabled={isVerifying}
-                    className="mt-4 w-full sp-btn-primary py-3 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-50"
+                    className="mt-3 w-full sp-btn-primary py-3 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-50"
                   >
                     {isVerifying ? "Đang xác thực giao dịch..." : "✅ Đã chuyển khoản - Kiểm tra thanh toán ngay"}
                   </button>
@@ -304,7 +336,7 @@ export default function CheckoutModal() {
                     <p className="font-bold text-white">{checkoutTicket.eventTitle}</p>
                     <p className="text-purple-400 truncate">{checkoutTicket.tier}</p>
                     <div className="flex justify-between text-gray-400 pt-2 border-t border-white/5 mt-2">
-                      <span>{isDepositTx ? "Tiền cọc" : "Tổng tiền"}</span>
+                      <span>{isDepositTx ? "Tiền cọc (25%)" : "Tổng thanh toán"}</span>
                       <span className="font-bold text-white">{fmt(total)}</span>
                     </div>
                   </div>

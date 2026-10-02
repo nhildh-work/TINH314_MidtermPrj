@@ -94,10 +94,18 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Mark ticket as sold
+      // Kiểm tra trạng thái hiện tại của vé: nếu là pending_deposit (người bán nạp cọc) thì chuyển sang available, còn người mua mua vé thì chuyển sang sold
+      const { data: ticketData } = await supabase
+        .from("tickets")
+        .select("status")
+        .eq("id", tx.ticket_id)
+        .maybeSingle();
+
+      const nextStatus = ticketData?.status === "pending_deposit" ? "available" : "sold";
+
       const { error: updateTicketErr } = await supabase
         .from("tickets")
-        .update({ status: "sold" })
+        .update({ status: nextStatus })
         .eq("id", tx.ticket_id);
 
       if (updateTicketErr) {

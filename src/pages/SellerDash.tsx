@@ -1,676 +1,352 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../context";
-import { type MyListing } from "../data";
 import { supabase } from "../lib/supabaseClient";
+import { PolicyModal } from "../components/PolicyModal";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
-// BẢNG CẤU HÌNH TRẠNG THÁI CHUẨN
-const STATUS_CFG = {
-  pending_deposit: { label: "⏳ CHỜ ĐÓNG CỌC", color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
-  available:       { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
-  locked:          { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
-  completed:       { label: "ĐÃ BÁN THÀNH CÔNG", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
-  disputed:        { label: "🚨 TRANH CHẤP (ĐÃ KHÓA TIỀN VÉ NÀY)", color: "#F87171", bg: "rgba(248,113,113,0.15)" },
-} as const;
-
-// POPUP YÊU CẦU RÚT TIỀN
-function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
-  const { currentProfile, refreshProfile } = useApp();
-  const [bank, setBank] = useState(currentProfile?.bank_name || "Vietcombank");
-  const [accountNum, setAccountNum] = useState(currentProfile?.bank_account || "");
-  const [accountName, setAccountName] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "");
-  const [amount, setAmount] = useState<string>(balance > 0 ? String(balance) : "0");
-  const [bankError, setBankError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-
-  const numAmount = Number(amount) || 0;
-  const isZero = balance <= 0;
-
-  const handleConfirmWithdraw = async () => {
-    setBankError(null);
-    if (!accountNum.trim() || !bank.trim() || !accountName.trim()) {
-      setBankError("Vui lòng điền đầy đủ thông tin tài khoản ngân hàng!");
-      return;
-    }
-
-    if (numAmount <= 0 || numAmount > balance) {
-      setBankError("Số tiền rút không hợp lệ hoặc vượt quá số dư khả dụng!");
-      return;
-    }
-
-    if (currentProfile?.id) {
-      try {
-        await supabase.from("profiles").update({
-          bank_name: bank,
-          bank_account: accountNum.trim(),
-          bank_holder: accountName.trim().toUpperCase(),
-        }).eq("id", currentProfile.id);
-        await refreshProfile();
-      } catch (e) {
-        console.warn("Lỗi lưu thông tin rút tiền:", e);
-      }
-    }
-
-    setConfirmed(true);
-  };
-
-  if (confirmed) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }}>
-        <div className="sp-card p-8 max-w-md w-full text-center space-y-4">
-          <div className="text-5xl">✅</div>
-          <h2 className="font-display font-800 text-white text-xl">Yêu cầu rút tiền đã được gửi!</h2>
-          <p className="text-sm text-gray-300 leading-relaxed">
-            Số tiền <strong className="text-emerald-400">{fmt(numAmount)}</strong> sẽ được chuyển vào tài khoản {bank} ({accountNum} - {accountName}) của bạn trong vòng 1-2 giờ làm việc.
-          </p>
-          <button onClick={onClose} className="sp-btn-primary w-full py-3 font-display font-700 cursor-pointer">
-            Đóng
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }} onClick={onClose}>
-      <div className="sp-card p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between pb-3 border-b border-white/5 mb-4">
-          <div>
-            <h2 className="font-display font-800 text-white text-lg">Rút Tiền Về Ngân Hàng</h2>
-            <p className="text-[11px] text-purple-400">Rút tiền trực tiếp từ số dư khả dụng</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">✕</button>
-        </div>
-
-        {isZero ? (
-          <div className="text-center py-6 space-y-3">
-            <div className="text-4xl">💰</div>
-            <p className="font-display font-700 text-white text-base">Số dư khả dụng: 0 VND</p>
-            <p className="text-xs text-gray-400 leading-relaxed">
-              Bạn chưa có vé nào hoàn tất giao dịch. Khi vé bán thành công và sự kiện diễn ra, tiền sẽ chuyển vào số dư để bạn rút.
-            </p>
-            <button onClick={onClose} className="sp-btn-ghost px-6 py-2.5 font-display font-700 cursor-pointer">
-              Đã hiểu
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 flex justify-between items-center text-xs">
-              <span className="text-gray-300">Số dư có thể rút:</span>
-              <span className="font-display font-800 text-emerald-400 text-sm">{fmt(balance)}</span>
-            </div>
-
-            <div>
-              <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng *</label>
-              <select value={bank} onChange={e => setBank(e.target.value)} className="sp-select">
-                <option value="Vietcombank">Vietcombank</option>
-                <option value="MB Bank">MB Bank (Quân Đội)</option>
-                <option value="Techcombank">Techcombank</option>
-                <option value="BIDV">BIDV</option>
-                <option value="VPBank">VPBank</option>
-                <option value="ACB">ACB</option>
-                <option value="TPBank">TPBank</option>
-                <option value="Vietinbank">Vietinbank</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng *</label>
-              <input
-                value={accountNum}
-                onChange={e => setAccountNum(e.target.value)}
-                className="sp-input font-mono"
-                placeholder="Nhập số tài khoản"
-              />
-            </div>
-
-            <div>
-              <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản *</label>
-              <input
-                value={accountName}
-                onChange={e => setAccountName(e.target.value)}
-                className="sp-input uppercase font-bold tracking-wide"
-                placeholder="Tên chủ tài khoản"
-              />
-            </div>
-
-            <div>
-              <label className="sp-filter-label mb-1.5 block">Số tiền muốn rút (VND)</label>
-              <input
-                type="number"
-                value={amount}
-                max={balance}
-                onChange={e => setAmount(e.target.value)}
-                className="sp-input font-display font-700 text-purple-300"
-              />
-            </div>
-
-            {bankError && (
-              <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
-                ⚠️ {bankError}
-              </div>
-            )}
-
-            <div className="flex gap-3 pt-2">
-              <button onClick={onClose} className="flex-1 sp-btn-ghost py-3 font-display font-700 cursor-pointer">
-                Hủy
-              </button>
-              <button
-                onClick={handleConfirmWithdraw}
-                disabled={numAmount <= 0 || numAmount > balance}
-                className="flex-1 sp-btn-primary py-3 font-display font-700 text-sm cursor-pointer disabled:opacity-40"
-              >
-                Xác nhận rút {fmt(numAmount)}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+function generateRefCode(ticketId: string | number) {
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  return `SP${ticketId}${randomSuffix}`;
 }
 
-// POPUP CHI TIẾT VÉ & NÚT ĐÓNG CỌC MỞ BÁN
-function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onClose: () => void; onDeleted: (id: number) => void }) {
-  const { setCheckoutTicket } = useApp();
-  const cfg = STATUS_CFG[listing.status as keyof typeof STATUS_CFG] || STATUS_CFG.available;
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const depositAmount = Math.round(listing.price * 0.25);
-
-  const handleDeleteListing = async () => {
-    if (!window.confirm("Bạn có chắc chắn muốn hủy niêm yết vé này không?")) return;
-    setLoading(true);
-    setErrorMsg(null);
-    try {
-      await supabase.from("transactions").delete().eq("ticket_id", listing.id);
-      const { error } = await supabase.from("tickets").delete().eq("id", listing.id);
-      if (error) throw error;
-
-      onDeleted(listing.id);
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err.message || "Không thể hủy niêm yết vé.");
-      setLoading(false);
-    }
-  };
-
-  const handlePayDepositNow = () => {
-    onClose();
-    // Mở Modal VietQR để thanh toán đúng 25% cọc
-    setCheckoutTicket({
-      id: listing.id,
-      eventTitle: listing.eventTitle,
-      price: depositAmount,
-      tier: `Cọc ký quỹ (25%): ${listing.tier}`,
-      eventDate: listing.date,
-      venue: "SafePass Escrow System",
-      isDeposit: true, // Kích hoạt luồng dành cho Người Bán Đóng Cọc
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="sp-card p-6 max-w-sm w-full space-y-4" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start justify-between">
-          <h2 className="font-display font-700 text-white text-sm leading-snug pr-4">{listing.eventTitle}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
-        </div>
-
-        <div className="space-y-3 text-xs">
-          <div className="flex justify-between items-center">
-            <span className="sp-filter-label">Hạng vé</span>
-            <span className="font-display font-700 text-purple-400">{listing.tier}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="sp-filter-label">Thời gian</span>
-            <span className="font-display font-700 text-gray-300">{listing.date}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="sp-filter-label">Giá niêm yết</span>
-            <span className="font-display font-700 text-white">{fmt(listing.price)}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="sp-filter-label">Trạng thái</span>
-            <span className="text-xs font-display font-700 px-2.5 py-1 rounded-full" style={{ color: cfg.color, background: cfg.bg }}>
-              {cfg.label}
-            </span>
-          </div>
-        </div>
-
-        {errorMsg && (
-          <div className="p-2.5 text-xs bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg">
-            ⚠ {errorMsg}
-          </div>
-        )}
-
-        {/* NÚT THANH TOÁN CỌC NẾU VÉ ĐANG CHỜ CỌC */}
-        {listing.status === "pending_deposit" ? (
-          <div className="space-y-2 pt-2 border-t border-white/10">
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
-              ⚠️ Vé này chưa hoàn tất đóng cọc ký quỹ (25%). Vui lòng chuyển khoản cọc để chính thức đăng bán vé lên hệ thống!
-            </div>
-            <button
-              onClick={handlePayDepositNow}
-              className="w-full py-3.5 rounded-xl font-display font-800 text-xs cursor-pointer shadow-lg bg-amber-500 hover:bg-amber-400 text-black transition-all"
-            >
-              ⚡ Thanh toán cọc ngay ({fmt(depositAmount)}) →
-            </button>
-            <button
-              onClick={handleDeleteListing}
-              disabled={loading}
-              className="w-full py-2 rounded-xl text-xs text-red-400 hover:text-red-300 transition-all cursor-pointer"
-            >
-              Hủy đăng vé này
-            </button>
-          </div>
-        ) : listing.status === "available" ? (
-          <button
-            onClick={handleDeleteListing}
-            disabled={loading}
-            className="w-full py-3 rounded-xl font-display font-700 text-xs transition-all cursor-pointer disabled:opacity-50"
-            style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)", color: "#F87171" }}
-          >
-            {loading ? "Đang xử lý..." : "Hủy và xóa niêm yết vé"}
-          </button>
-        ) : (
-          <p className="text-xs text-center text-gray-400">
-            {listing.status === "locked" ? "Vé đang giao dịch, không thể hủy." : "Vé đã bán hoặc đang tranh chấp, không thể hủy."}
-          </p>
-        )}
-      </div>
-    </div>
+export default function CheckoutModal() {
+  const { checkoutTicket, closeCheckout, addToCart, currentUser, currentProfile, addPurchasedTicket, nav } = useApp();
+  const [showTerms, setShowTerms] = useState(false);
+  const [done, setDone] = useState(false);
+  const [refCode, setRefCode] = useState<string>(() =>
+    checkoutTicket ? generateRefCode(checkoutTicket.id) : ""
   );
-}
+  const [qrReady, setQrReady] = useState(true);
+  const [paymentStatus, setPaymentStatus] = useState<"pending" | "paid">("pending");
+  const [isVerifying, setIsVerifying] = useState(false);
 
-// COMPONENT CHÍNH
-export default function SellerDash() {
-  const { nav, kycStatus, currentProfile, currentUser, refreshProfile, t } = useApp();
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [detailListing, setDetailListing] = useState<MyListing | null>(null);
-  const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
-  const [sellerDisputes, setSellerDisputes] = useState<any[]>([]);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedAcc, setCopiedAcc] = useState(false);
+  const [copiedAmount, setCopiedAmount] = useState(false);
 
-  // TÍCH HỢP ĐẦY ĐỦ THÔNG TIN LIÊN HỆ & NGÂN HÀNG
-  const [phone, setPhone] = useState("");
-  const [bankName, setBankName] = useState("Vietcombank");
-  const [accountNumber, setAccountNumber] = useState("");
-  const [accountHolder, setAccountHolder] = useState("");
+  // Biến cờ tuyệt đối để phân biệt Luồng Người Bán Đóng Cọc vs Người Mua
+  const isDepositTx = checkoutTicket?.isDeposit === true || checkoutTicket?.tier?.includes("Cọc");
 
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const activeUserId = currentUser?.id || currentProfile?.id || "anonymous-user";
 
-  // ĐỒNG BỘ DỮ LIỆU TỪ PROFILE/AUTH
-  useEffect(() => {
-    if (currentProfile) {
-      setPhone(currentProfile.phone || currentUser?.phone || "");
-      setBankName(currentProfile.bank_name || "Vietcombank");
-      setAccountNumber(currentProfile.bank_account || "");
-      setAccountHolder(currentProfile.bank_holder || currentProfile.full_name || "");
-    }
-  }, [currentProfile, currentUser]);
-
-  useEffect(() => {
-    const uid = currentUser?.id;
-    if (!uid) return;
-
-    async function loadSellerTickets() {
+  const handleClose = async () => {
+    if (paymentStatus === "pending" && refCode && checkoutTicket?.id && !isDepositTx) {
       try {
-        const { data, error } = await supabase
-          .from("tickets")
-          .select("*")
-          .eq("seller_id", uid)
-          .order("created_at", { ascending: false });
-
-        if (!error && data) {
-          const mapped: MyListing[] = data.map((t: any) => ({
-            id: Number(t.id),
-            eventTitle: t.event_name,
-            tier: t.tier || "Standard",
-            price: Number(t.price),
-            status: t.status === "pending_deposit" ? "pending_deposit" : t.status === "disputed" ? "disputed" : t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
-            date: t.event_date || "Sắp diễn ra",
-          }));
-          setSellerTickets(mapped);
-        }
-
-        const { data: disData } = await supabase
-          .from("disputes")
-          .select("*, tickets(*)")
-          .eq("seller_id", uid);
-
-        if (disData) setSellerDisputes(disData);
+        await supabase.from("transactions").delete().eq("reference_code", refCode);
+        await supabase.from("tickets").update({ status: "available" }).eq("id", checkoutTicket.id);
       } catch (err) {
-        console.error("Lỗi khi tải dữ liệu người bán:", err);
+        console.warn("Lỗi dọn dẹp transaction pending:", err);
       }
     }
-
-    loadSellerTickets();
-
-    const channel = supabase
-      .channel("seller_realtime_channel")
-      .on("postgres_changes", { event: "*", schema: "public", table: "tickets" }, () => {
-        loadSellerTickets();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentUser]);
-
-  // HÀM LƯU TÀI KHOẢN & SĐT (ĐỒNG BỘ PROFILES VÀ AUTH)
-  const handleSaveBankInfo = async () => {
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    if (!accountNumber.trim() || !phone.trim() || !accountHolder.trim()) {
-      setErrorMsg("Vui lòng nhập đầy đủ Số điện thoại, Số tài khoản và Tên chủ tài khoản!");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const holderName = accountHolder.trim().toUpperCase() || (currentProfile?.full_name || "").toUpperCase();
-
-      // Lưu vào profiles table
-      if (currentProfile?.id) {
-        const { error: profileErr } = await supabase.from("profiles").update({
-          phone: phone.trim(),
-          bank_name: bankName,
-          bank_account: accountNumber.trim(),
-          bank_holder: holderName,
-        }).eq("id", currentProfile.id);
-
-        if (profileErr) {
-          console.warn("Lỗi lưu profiles:", profileErr.message);
-        }
-      }
-
-      // Lưu dự phòng vào Auth metadata
-      await supabase.auth.updateUser({
-        data: {
-          phone: phone.trim(),
-          bank_name: bankName,
-          bank_account: accountNumber.trim(),
-          bank_holder: holderName,
-        }
-      });
-
-      await refreshProfile();
-      setSuccessMsg("✓ Đã lưu và đồng bộ Thông Tin Liên Hệ & Tài Khoản Ngân Hàng thành công!");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Lỗi khi lưu thông tin.");
-    } finally {
-      setLoading(false);
-    }
+    closeCheckout();
   };
 
-  const allSellerListings = sellerTickets;
+  useEffect(() => {
+    if (!checkoutTicket) return;
 
-  const isKycApproved =
-    kycStatus === "approved" ||
-    currentProfile?.kyc_status === "approved" ||
-    currentProfile?.is_verified === true ||
-    currentProfile?.role === "seller";
+    setDone(false);
+    setPaymentStatus("pending");
 
-  if (!isKycApproved) {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-24 text-center">
-        <div className="w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-6 text-4xl"
-          style={{ background: "rgba(139,92,246,0.1)", border: "2px solid rgba(139,92,246,0.2)" }}>
-          🔐
-        </div>
-        <h2 className="font-display font-800 text-white text-2xl mb-2">{t.kycRequired}</h2>
-        <p className="text-sm mb-2 max-w-xs mx-auto leading-relaxed" style={{ color: "#9ca3af" }}>{t.kycSub}</p>
-        <p className="text-xs mb-6" style={{ color: "#4b5563" }}>{t.kycNote}</p>
-        <button onClick={() => nav("kyc")} className="sp-btn-primary px-8 py-3 font-display font-700 cursor-pointer">
-          {t.kycStart}
-        </button>
-      </div>
-    );
-  }
+    let code = refCode;
+    if (!code) {
+      code = generateRefCode(checkoutTicket.id);
+      setRefCode(code);
+    }
 
-  // THỐNG KÊ (Chỉ đếm vé available là đang mở bán)
-  const activeCount = allSellerListings.filter(l => l.status === "available").length;
-  const soldListings = allSellerListings.filter(l => l.status === "completed");
-  const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
+    // CHUẨN GIÁ: Đóng cọc = giá gốc (25% đã tính). Mua vé = Giá vé + 5% Phí nền tảng
+    const finalAmount = isDepositTx
+      ? checkoutTicket.price
+      : checkoutTicket.price + Math.round(checkoutTicket.price * 0.05);
 
-  const STATS = [
-    { label: "Tổng số vé niêm yết", value: String(allSellerListings.length), icon: "🎟️", color: "#8B5CF6" },
-    { label: "Đang mở bán", value: String(activeCount), icon: "🟢", color: "#A3E635" },
-    { label: "Số dư khả dụng để rút", value: fmt(availableBalance), icon: "💰", color: "#10B981" },
-  ];
+    async function initTransaction() {
+      try {
+        if (checkoutTicket && checkoutTicket.id) {
+          // Xóa các dòng pending cũ để chống trùng cờ giao dịch
+          await supabase
+            .from("transactions")
+            .delete()
+            .eq("ticket_id", checkoutTicket.id)
+            .eq("status", "pending");
+
+          // Tạo transaction pending mới
+          await supabase.from("transactions").insert({
+            ticket_id: checkoutTicket.id,
+            buyer_id: activeUserId,
+            amount: finalAmount,
+            status: "pending",
+            reference_code: code,
+          });
+        }
+      } catch (err) {
+        console.warn("Lỗi khởi tạo giao dịch Supabase (vẫn hiển thị mã QR SePay):", err);
+      } finally {
+        setQrReady(true);
+      }
+    }
+
+    initTransaction();
+  }, [checkoutTicket?.id, activeUserId]);
+
+  if (!checkoutTicket) return null;
+
+  const total = isDepositTx
+    ? checkoutTicket.price
+    : checkoutTicket.price + Math.round(checkoutTicket.price * 0.05);
+
+  // URL QR SePay chính thức và VietQR dự phòng
+  const sepayQrUrl = refCode
+    ? `https://qr.sepay.vn/img?acc=04111724267899&bank=MBBank&amount=${total}&des=${refCode}`
+    : "";
+  const vietQrUrl = refCode
+    ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${total}&addInfo=${refCode}&accountName=NGUYEN DINH NGUYEN`
+    : "";
+
+  // HÀM HOÀN TẤT GIAO DỊCH TÁCH BIỆT 100% 2 LUỒNG
+  const completePurchase = async () => {
+    setPaymentStatus("paid");
+
+    try {
+      if (refCode) {
+        await supabase.from("transactions").update({ status: "paid" }).eq("reference_code", refCode);
+      }
+
+      if (checkoutTicket && checkoutTicket.id) {
+        if (isDepositTx) {
+          // 🟢 LUỒNG NGƯỜI BÁN ĐÓNG CỌC: Chuyển vé sang available để bán công khai
+          await supabase.from("tickets").update({ status: "available" }).eq("id", checkoutTicket.id);
+          // TUYỆT ĐỐI KHÔNG addPurchasedTicket() VÀ KHÔNG addToCart() VÀO ĐÂY!
+        } else {
+          // 🔵 LUỒNG NGƯỜI MUA MUA VÉ: Đánh dấu vé sold và thêm vào vé của tôi
+          await supabase.from("tickets").update({ status: "sold" }).eq("id", checkoutTicket.id);
+          
+          addToCart();
+          addPurchasedTicket({
+            id: checkoutTicket.id || Date.now(),
+            eventTitle: checkoutTicket.eventTitle,
+            eventImage: checkoutTicket.eventImage,
+            tier: checkoutTicket.tier,
+            date: checkoutTicket.eventDate || "Sắp diễn ra",
+            venue: checkoutTicket.venue || checkoutTicket.city || "TP.HCM",
+            price: total,
+            status: "paid", 
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Lỗi cập nhật DB:", e);
+    }
+
+    setDone(true);
+  };
+
+  const handleManualVerify = async () => {
+    setIsVerifying(true);
+    setTimeout(() => {
+      completePurchase();
+      setIsVerifying(false);
+    }, 1200);
+  };
 
   return (
-    <div className="max-w-[1680px] mx-auto px-5 lg:px-8 py-8">
-      {showWithdraw && <WithdrawModal balance={availableBalance} onClose={() => setShowWithdraw(false)} />}
-      {detailListing && (
-        <DetailModal 
-          listing={detailListing} 
-          onClose={() => setDetailListing(null)} 
-          onDeleted={(deletedId) => setSellerTickets(prev => prev.filter(item => item.id !== deletedId))}
-        />
-      )}
-
-      {/* CẢNH BÁO TRANH CHẤP */}
-      {sellerDisputes.length > 0 && (
-        <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">🚨</span>
-            <div>
-              <h3 className="font-display font-800 text-red-400 text-sm">
-                CẢNH BÁO TRANH CHẤP KHẨN CẤP ({sellerDisputes.length} đơn)
-              </h3>
-              <p className="text-xs text-gray-300">
-                Khoản thanh toán của vé bị khiếu nại đang bị đóng băng độc lập. Các vé thành công khác vẫn rút tiền bình thường.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => nav("dispute-center")}
-            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-display font-700 text-xs rounded-xl transition-all cursor-pointer"
-          >
-            Vào Trung tâm tranh chấp →
-          </button>
-        </div>
-      )}
-
-      {/* HEADER BẢNG ĐIỀU KHIỂN */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-7">
-        <div>
-          <h1 className="font-display font-800 text-white text-2xl">{t.sellerDashTitle}</h1>
-          <p className="text-sm mt-0.5 text-gray-400">{t.sellerDashSub}</p>
-        </div>
-        <div className="flex gap-3">
-          <button onClick={() => nav("dispute-center")} className="sp-btn-ghost px-4 py-2.5 font-display font-700 text-sm cursor-pointer"
-            style={{ borderColor: "rgba(248,113,113,0.25)", color: "#F87171" }}>
-            Trung tâm tranh chấp
-          </button>
-          <button onClick={() => nav("new-listing")} className="sp-btn-primary px-5 py-2.5 font-display font-700 cursor-pointer">
-            + Đăng bán vé mới
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        {STATS.map(s => (
-          <div key={s.label} className="sp-card p-5">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" style={{ background: s.color + "1a" }}>
-                {s.icon}
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ background: "rgba(0,0,0,0.88)", backdropFilter: "blur(12px)" }}
+        onClick={handleClose}
+      >
+        <div
+          className="sp-card w-full max-w-2xl overflow-y-auto"
+          style={{ maxHeight: "92vh" }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🔒</span>
+              <div>
+                <h2 className="font-display font-800 text-white text-lg">
+                  {isDepositTx ? "Thanh Toán Cọc Ký Quỹ Mở Bán" : "Thanh Toán Chuyển Khoản SePay / VietQR"}
+                </h2>
+                <p className="text-[11px] text-gray-400">Giao dịch được bảo vệ an toàn qua SafePass Escrow & SePay Gateway</p>
               </div>
-              <p className="text-xs text-gray-400">{s.label}</p>
             </div>
-            <p className="font-display font-800 text-white text-2xl">{s.value}</p>
+            <button onClick={handleClose} className="w-8 h-8 rounded-full text-gray-400 hover:text-white cursor-pointer">✕</button>
           </div>
-        ))}
-      </div>
 
-      {/* FORM THÔNG TIN LIÊN HỆ & NGÂN HÀNG (CÓ THÊM SĐT) */}
-      <div className="sp-card p-6 mb-6">
-        <div className="pb-4 border-b border-white/5 mb-4">
-          <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
-            <span>🏦</span>
-            <span>Thông Tin Liên Hệ & Tài Khoản Nhận Tiền</span>
-          </h2>
-          <p className="text-xs text-gray-400 mt-1">
-            Số điện thoại liên hệ và tài khoản ngân hàng để hệ thống SafePass tự động giải ngân hoặc hoàn cọc.
-          </p>
-        </div>
+          {done ? (
+            /* 🔴 POPUP THÔNG BÁO TỰ ĐỘNG CHIA 2 LUỒNG 🔴 */
+            <div className="p-10 text-center space-y-5 animate-in fade-in zoom-in duration-300">
+              <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center mx-auto text-5xl animate-bounce">
+                🎉
+              </div>
+              <div>
+                <h3 className="font-display font-800 text-white text-2xl">
+                  {isDepositTx ? "Hoàn Tất Đóng Cọc Ký Quỹ!" : "Thanh Toán Mua Vé Thành Công!"}
+                </h3>
+                <p className="text-sm text-gray-300 leading-relaxed max-w-md mx-auto mt-2">
+                  {isDepositTx 
+                    ? "Giao dịch ký quỹ Escrow đã hoàn tất. Vé của bạn đã được chuyển sang trạng thái ĐANG BÁN trên sàn giao dịch!" 
+                    : "Hệ thống SafePass đã xác nhận biến động số dư. Vé điện tử chính thức đã được chuyển vào mục Vé Của Tôi."}
+                </p>
+              </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="sp-filter-label mb-1.5 block">Số điện thoại liên hệ *</label>
-            <input
-              type="text"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              className="sp-input font-mono"
-              placeholder="Nhập số điện thoại..."
-            />
-          </div>
-          <div>
-            <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng *</label>
-            <select value={bankName} onChange={e => setBankName(e.target.value)} className="sp-select">
-              <option value="Vietcombank">Vietcombank</option>
-              <option value="MB Bank">MB Bank (Quân Đội)</option>
-              <option value="Techcombank">Techcombank</option>
-              <option value="BIDV">BIDV</option>
-              <option value="VPBank">VPBank</option>
-              <option value="ACB">ACB</option>
-              <option value="TPBank">TPBank</option>
-              <option value="Vietinbank">Vietinbank</option>
-            </select>
-          </div>
-        </div>
+              <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 text-left max-w-md mx-auto space-y-2">
+                <p className="flex justify-between">
+                  <span className="text-gray-400">Mã giao dịch:</span>
+                  <strong className="font-mono text-amber-300">{refCode}</strong>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-gray-400">Sự kiện:</span>
+                  <strong>{checkoutTicket.eventTitle}</strong>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-gray-400">Trạng thái:</span>
+                  <strong className="text-emerald-400">
+                    {isDepositTx ? "✓ Đã mở bán công khai" : "✓ Đã đưa vào kho vé"}
+                  </strong>
+                </p>
+              </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng *</label>
-            <input
-              type="text"
-              value={accountNumber}
-              onChange={e => setAccountNumber(e.target.value)}
-              className="sp-input font-mono"
-              placeholder="Nhập số tài khoản ngân hàng..."
-            />
-          </div>
-          <div>
-            <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản (Khớp với CCCD) *</label>
-            <input
-              type="text"
-              value={accountHolder}
-              onChange={e => setAccountHolder(e.target.value)}
-              className="sp-input uppercase font-bold tracking-wide"
-              placeholder="Nhập tên chủ tài khoản..."
-            />
-          </div>
-        </div>
-
-        {errorMsg && (
-          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded-xl">
-            ⚠️ {errorMsg}
-          </div>
-        )}
-
-        {successMsg && (
-          <div className="mt-4 p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs rounded-xl font-bold">
-            {successMsg}
-          </div>
-        )}
-
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={handleSaveBankInfo}
-            disabled={loading}
-            className="sp-btn-primary px-6 py-2.5 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-40"
-          >
-            {loading ? "Đang lưu..." : "Lưu & Đồng Bộ Thông Tin"}
-          </button>
-        </div>
-      </div>
-
-      <div className="mb-6 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-blue-500/10 border border-blue-500/20">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">📅</span>
-          <div>
-            <p className="text-sm text-gray-200">
-              Chính sách đối soát: <strong className="text-blue-400">Thứ Sáu hàng tuần</strong> hoặc rút trực tiếp khi sự kiện hoàn tất. Phí nền tảng <strong className="text-purple-400">5%</strong>.
-            </p>
-            <p className="text-xs text-gray-400">
-              Tiền cọc ký quỹ 25% được hoàn trả 100% khi giao dịch không có khiếu nại.
-            </p>
-          </div>
-        </div>
-        <button onClick={() => setShowWithdraw(true)} className="sp-btn-primary text-xs px-5 py-2.5 font-display font-700 shrink-0 cursor-pointer">
-          Rút tiền về ngân hàng
-        </button>
-      </div>
-
-      <div className="sp-card overflow-hidden">
-        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-          <h2 className="font-display font-700 text-white text-sm">Danh Sách Vé Đã Đăng Bán</h2>
-          <span className="text-xs font-display font-600 text-gray-400">{allSellerListings.length} vé</span>
-        </div>
-        <div className="overflow-x-auto">
-          {allSellerListings.length === 0 ? (
-            <div className="p-10 text-center text-gray-400 text-sm">
-              Bạn chưa có vé nào được đăng bán. Bấm nút <strong>"+ Đăng bán vé mới"</strong> để bắt đầu.
+              <div className="flex justify-center gap-3 pt-2">
+                <button
+                  onClick={() => { 
+                    closeCheckout(); 
+                    if (isDepositTx) {
+                      nav("seller-dash"); // Đóng cọc thì quay lại Dashboard Người Bán
+                    } else {
+                      nav("my-tickets"); // Mua vé thì về Vé của tôi
+                    }
+                  }}
+                  className="sp-btn-primary px-8 py-3.5 font-display font-800 text-sm cursor-pointer shadow-xl"
+                >
+                  {isDepositTx ? "Quản lý Bảng Điều Khiển →" : "Xem trong kho vé của tôi →"}
+                </button>
+              </div>
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", display: "table-row" }}>
-                  {["SỰ KIỆN", "HẠNG VÉ", "GIÁ NIÊM YẾT", "THỜI GIAN", "TRẠNG THÁI", ""].map(h => (
-                    <th key={h} className="sp-filter-label" style={{ textAlign: "left", padding: "12px 20px", display: "table-cell" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {allSellerListings.map(listing => {
-                  const cfg = STATUS_CFG[listing.status as keyof typeof STATUS_CFG] || STATUS_CFG.available;
-                  return (
-                    <tr
-                      key={listing.id}
-                      onClick={() => setDetailListing(listing)}
-                      className="cursor-pointer hover:bg-white/[0.02] transition-colors"
-                      style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", display: "table-row" }}
-                    >
-                      <td style={{ padding: "14px 20px" }}>
-                        <p className="font-display font-700 text-white text-sm truncate">{listing.eventTitle}</p>
-                      </td>
-                      <td style={{ padding: "14px 20px" }}>
-                        <span className="font-display font-600 text-xs text-purple-400">{listing.tier}</span>
-                      </td>
-                      <td style={{ padding: "14px 20px" }}>
-                        <span className="font-display font-800 text-white text-sm">{fmt(listing.price)}</span>
-                      </td>
-                      <td style={{ padding: "14px 20px" }}>
-                        <span className="text-xs text-gray-400">{listing.date}</span>
-                      </td>
-                      <td style={{ padding: "14px 20px" }}>
-                        <span
-                          className="text-xs font-display font-700 px-2.5 py-0.5 rounded-full inline-block"
-                          style={{ color: cfg.color, background: cfg.bg }}
+            <div className="flex flex-col md:flex-row">
+              <div className="flex-1 p-6 border-r border-white/5">
+                <div className="rounded-2xl p-4 flex flex-col items-center bg-purple-500/5 border border-purple-500/20">
+                  <div className="flex items-center gap-1.5 text-xs font-700 text-emerald-400 mb-3 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
+                    <span>📱</span>
+                    <span>Quét mã QR SePay bằng App Ngân hàng bất kỳ</span>
+                  </div>
+
+                  <div className="relative mb-4 bg-white p-2 rounded-2xl shadow-xl">
+                    <img
+                      src={sepayQrUrl || vietQrUrl}
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.triedFallback) {
+                          target.dataset.triedFallback = "true";
+                          target.src = vietQrUrl;
+                        }
+                      }}
+                      alt="Mã QR Chuyển Khoản SePay"
+                      className="rounded-xl"
+                      style={{ width: 210, height: 210 }}
+                    />
+                  </div>
+
+                  <div className="w-full rounded-xl p-3.5 bg-black/50 border border-white/8 space-y-2.5 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Ngân hàng:</span>
+                      <span className="font-700 text-white">🏦 MB Bank (Quân Đội)</span>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Số tài khoản:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-700 text-white">04111724267899</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText("04111724267899");
+                            setCopiedAcc(true);
+                            setTimeout(() => setCopiedAcc(false), 2000);
+                          }}
+                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-300 cursor-pointer hover:bg-white/20"
                         >
-                          {cfg.label}
-                        </span>
-                      </td>
-                      <td style={{ padding: "14px 20px", textAlign: "right" }}>
-                        <span className="text-xs text-gray-500">Chi tiết →</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          {copiedAcc ? "✓ Đã chép" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Chủ tài khoản:</span>
+                      <span className="font-700 text-white">NGUYEN DINH NGUYEN</span>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Số tiền:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-display font-800 text-emerald-400">{fmt(total)}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(total));
+                            setCopiedAmount(true);
+                            setTimeout(() => setCopiedAmount(false), 2000);
+                          }}
+                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-gray-300 cursor-pointer hover:bg-white/20"
+                        >
+                          {copiedAmount ? "✓ Đã chép" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 border-t border-white/8">
+                      <span className="text-purple-300 font-700">Nội dung CK:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-800 text-purple-300">{refCode}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(refCode);
+                            setCopiedCode(true);
+                            setTimeout(() => setCopiedCode(false), 2000);
+                          }}
+                          className="px-2 py-0.5 rounded bg-purple-500/25 text-[10px] text-purple-300 cursor-pointer hover:bg-purple-500/40"
+                        >
+                          {copiedCode ? "✓ Đã chép" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-gray-400 text-center mt-2.5">
+                    ⚡ Hệ thống tự động xác nhận qua SePay Webhook khi nhận chuyển khoản
+                  </p>
+
+                  <button
+                    onClick={handleManualVerify}
+                    disabled={isVerifying}
+                    className="mt-3 w-full sp-btn-primary py-3 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-50"
+                  >
+                    {isVerifying ? "Đang xác thực giao dịch..." : "✅ Đã chuyển khoản - Kiểm tra thanh toán ngay"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="w-full md:w-72 p-6 shrink-0 flex flex-col justify-between">
+                <div>
+                  <p className="sp-filter-label mb-3">Tóm tắt đơn hàng</p>
+                  <div className="p-3 bg-white/[0.02] rounded-xl border border-white/5 space-y-2 text-xs">
+                    <p className="font-bold text-white">{checkoutTicket.eventTitle}</p>
+                    <p className="text-purple-400 truncate">{checkoutTicket.tier}</p>
+                    <div className="flex justify-between text-gray-400 pt-2 border-t border-white/5 mt-2">
+                      <span>{isDepositTx ? "Tiền cọc (25%)" : "Tổng thanh toán"}</span>
+                      <span className="font-bold text-white">{fmt(total)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
-    </div>
+      <PolicyModal isOpen={showTerms} onClose={() => setShowTerms(false)} />
+    </>
   );
 }
