@@ -36,16 +36,18 @@ Deno.serve(async (req) => {
 
     if (!content) continue;
 
-    // Extract reference code like "SP-1748000000000" from transfer description
-    const match = content.match(/SP-(\d+)/);
+    // Extract reference code matching SePay format (e.g. SP123456 or SP-123456)
+    const match = content.match(/SP-?(\d{3,10})/i);
     if (!match) continue;
-    const refCode = `SP-${match[1]}`;
+    const digits = match[1];
+    const refCode = `SP${digits}`;
+    const altRefCode = `SP-${digits}`;
 
-    // Look up the transaction by reference_code
+    // Look up the transaction by reference_code (supports both SP123456 and SP-123456)
     const { data: tx, error: txErr } = await supabase
       .from("transactions")
       .select("id, amount, ticket_id, status")
-      .eq("reference_code", refCode)
+      .or(`reference_code.eq.${refCode},reference_code.eq.${altRefCode}`)
       .maybeSingle();
 
     if (txErr || !tx) {
