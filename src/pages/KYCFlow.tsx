@@ -233,7 +233,7 @@ function extractCccdFromText(rawText: string): { fullName: string; idNumber: str
 }
 
 export default function KYCFlow() {
-  const { setKycStatus, nav, refreshProfile } = useApp();
+  const { setKycStatus, setRole, nav, refreshProfile } = useApp();
   const [step, setStep] = useState<KycStep>(1);
 
   // Files & Previews
@@ -511,15 +511,14 @@ export default function KYCFlow() {
 
       const distance = faceapi.euclideanDistance(cccdDescriptor, detection.descriptor);
 
-      if (distance < 0.50) {
+      if (distance < 0.58) {
         setMatchingStatus("matched");
         stopCamera();
       } else {
         setMatchingStatus("failed");
       }
     } catch (err) {
-      setMatchingStatus("matched");
-      stopCamera();
+      setMatchingStatus("failed");
     }
   };
 
@@ -538,6 +537,7 @@ export default function KYCFlow() {
         .update({
           kyc_status: "approved",
           is_verified: true,
+          role: "seller",
           full_name: ocrData.fullName,
           cccd_number: ocrData.idNumber,
         })
@@ -545,6 +545,7 @@ export default function KYCFlow() {
 
       if (dbError) throw dbError;
       
+      setRole("seller");
       setKycStatus("approved");
       await refreshProfile();
       setStep(4);
@@ -952,36 +953,26 @@ export default function KYCFlow() {
           )}
 
           {matchingStatus === "failed" && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs mb-5 text-center">
-              Không khớp khuôn mặt rõ ràng. Bạn có muốn bỏ qua bước này không?
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs mb-5 text-center leading-relaxed">
+              ⚠️ Khuôn mặt chụp chưa khớp với ảnh chân dung trên CCCD hoặc góc chụp chưa đủ rõ nét. Vui lòng căn chỉnh thẳng khuôn mặt và chụp lại!
             </div>
           )}
 
           <div className="flex gap-3">
             {matchingStatus !== "matched" ? (
-              <div className="flex gap-2 w-full">
+              <div className="w-full">
                 <button
                   onClick={handleCaptureAndMatch}
                   disabled={!!cameraError || matchingStatus === "scanning"}
-                  className="flex-1 sp-btn-primary py-3.5 font-display font-700 text-sm cursor-pointer"
+                  className="w-full sp-btn-primary py-3.5 font-display font-700 text-sm cursor-pointer disabled:opacity-50"
                 >
-                  📸 Chụp & Đối Chiếu
-                </button>
-                <button
-                  onClick={() => {
-                    setMatchingStatus("matched");
-                    stopCamera();
-                  }}
-                  className="px-4 py-3.5 rounded-xl font-display font-700 text-xs bg-slate-800 text-gray-300 hover:text-white border border-slate-700 cursor-pointer"
-                  title="Bỏ qua nếu camera lỗi"
-                >
-                  Bỏ qua ⏭️
+                  {matchingStatus === "scanning" ? "⏳ Đang đối chiếu khuôn mặt..." : "📸 Chụp & Đối Chiếu Khuôn Mặt"}
                 </button>
               </div>
             ) : (
               <button
                 onClick={handleCompleteKYC}
-                className="w-full py-3.5 rounded-xl font-display font-800 text-black text-sm bg-gradient-to-r from-lime-400 to-emerald-400 cursor-pointer"
+                className="w-full py-3.5 rounded-xl font-display font-800 text-black text-sm bg-gradient-to-r from-lime-400 to-emerald-400 cursor-pointer shadow-lg hover:opacity-95 transition-opacity"
               >
                 ✓ Hoàn Tất & Kích Hoạt Quyền Người Bán →
               </button>

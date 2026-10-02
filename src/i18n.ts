@@ -90,7 +90,7 @@ export const rawTranslations = {
     sellerDashSub: "Quản lý danh sách vé đã đăng, tiền ký quỹ và trạng thái giao dịch.",
     disputeBtn: "Trung tâm tranh chấp",
     listNew: "+ Đăng bán vé mới",
-    payoutBanner: "Số dư khả dụng để rút về tài khoản ngân hàng.",
+    payoutBanner: (day: string = "Thứ Sáu hàng tuần", fee: string = "5%") => `Số dư khả dụng sẽ được đối soát và giải ngân định kỳ vào ${day}. Phí nền tảng là ${fee}.`,
     withdrawNow: "Rút tiền về ngân hàng",
     listingTable: "Danh Sách Vé Đã Đăng Bán",
     colEvent: "Sự kiện",
@@ -207,7 +207,7 @@ export const rawTranslations = {
     sellerDashSub: "Manage listings, escrow funds, and transactions.",
     disputeBtn: "Dispute Center",
     listNew: "+ List New Ticket",
-    payoutBanner: "Available balance for bank withdrawal.",
+    payoutBanner: (day: string = "Friday", fee: string = "5%") => `Available balance will be reconciled and paid out on ${day}. Platform fee is ${fee}.`,
     withdrawNow: "Withdraw to Bank",
     listingTable: "Listed Tickets",
     colEvent: "Event",
@@ -249,10 +249,22 @@ export function getTranslations(lang: Lang): T {
     get(target: any, prop: string | symbol) {
       if (typeof prop === "symbol") return target[prop];
       if (prop in target) {
-        return target[prop];
+        const val = target[prop];
+        if (typeof val === "string") {
+          // If a string property is called as a function like val("arg1", "arg2"), safely return the string
+          const callableString: any = function(...args: any[]) {
+            return val;
+          };
+          callableString.toString = () => val;
+          callableString.valueOf = () => val;
+          callableString.split = (delim: string) => val.split(delim);
+          callableString.includes = (substr: string) => val.includes(substr);
+          return val;
+        }
+        return val;
       }
       // Return a universal callable string fallback to prevent "is not a function" and undefined rendering issues
-      const fallbackFn: any = (arg?: any) => (arg !== undefined ? String(arg) : "");
+      const fallbackFn: any = (...args: any[]) => (args.length > 0 && args[0] !== undefined ? String(args[0]) : "");
       fallbackFn.toString = () => "";
       fallbackFn.valueOf = () => "";
       fallbackFn.split = (delim: string) => [""];
@@ -269,4 +281,3 @@ export const translations = {
 
 export type Lang = "vi" | "en";
 export type T = Record<string, any>;
-

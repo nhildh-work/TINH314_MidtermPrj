@@ -33,7 +33,7 @@ export default function CheckoutModal() {
     const code = generateRefCode();
     setRefCode(code);
 
-    const fee = Math.round(checkoutTicket.price * 0.02);
+    const fee = Math.round(checkoutTicket.price * 0.05);
     const total = checkoutTicket.price + fee;
 
     async function initTransaction() {
@@ -112,7 +112,7 @@ export default function CheckoutModal() {
 
   if (!checkoutTicket) return null;
 
-  const fee = Math.round(checkoutTicket.price * 0.02);
+  const fee = Math.round(checkoutTicket.price * 0.05);
   const total = checkoutTicket.price + fee;
 
   const qrUrl = refCode
@@ -333,7 +333,7 @@ export default function CheckoutModal() {
                       <span>Giá vé</span><span>{fmt(checkoutTicket.price)}</span>
                     </div>
                     <div className="flex justify-between text-xs" style={{ color: "#9ca3af" }}>
-                      <span>Phí dịch vụ (2%)</span><span>{fmt(fee)}</span>
+                      <span>Phí bảo vệ giao dịch (5%)</span><span>{fmt(fee)}</span>
                     </div>
                     <div className="flex justify-between font-display font-800 text-white pt-2 text-sm" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                       <span>Tổng cộng</span><span className="text-purple-300">{fmt(total)}</span>

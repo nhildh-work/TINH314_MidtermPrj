@@ -133,13 +133,14 @@ export default function SellerDash() {
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    const uid = currentUser?.id;
+    if (!uid) return;
     async function loadSellerTickets() {
       try {
         const { data, error } = await supabase
           .from("tickets")
           .select("*")
-          .eq("seller_id", currentUser.id)
+          .eq("seller_id", uid)
           .order("created_at", { ascending: false });
 
         if (!error && data && data.length > 0) {
@@ -229,7 +230,7 @@ export default function SellerDash() {
       <div className="mb-5 p-3.5 rounded-xl flex items-center gap-3" style={{ background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.14)" }}>
         <span className="text-xl">📅</span>
         <p className="text-sm flex-1" style={{ color: "#9ca3af" }}
-          dangerouslySetInnerHTML={{ __html: t.payoutBanner('<strong style="color:#60A5FA">Friday</strong>', '<strong style="color:#FBBF24">1.5%</strong>') }} />
+          dangerouslySetInnerHTML={{ __html: typeof t.payoutBanner === "function" ? t.payoutBanner('<strong style="color:#60A5FA">Thứ Sáu hàng tuần</strong>', '<strong style="color:#A78BFA">5%</strong>') : (t.payoutBanner || "") }} />
         <button onClick={() => setShowWithdraw(true)} className="sp-btn-ghost text-xs px-4 py-2 font-display font-700 shrink-0">
           {t.withdrawNow}
         </button>
