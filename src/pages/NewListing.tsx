@@ -53,9 +53,15 @@ export default function NewListing() {
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${depositAmount}&addInfo=${encodeURIComponent(depositRefCode)}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  const handleConfirmDepositAndPublish = async () => {
+  // TỰ ĐỘNG KHỞI TẠO VÉ & LẮNG NGHE WEBHOOK KHI VÀO BƯỚC 3
+  const handleProceedToStep3 = async () => {
     if (!currentUser) {
       setAuthModal("login");
+      return;
+    }
+
+    if (!agreedTerms) {
+      setErrorMsg("Vui lòng đồng ý với Điều khoản & Chính sách giao dịch.");
       return;
     }
 
@@ -63,13 +69,14 @@ export default function NewListing() {
       setLoading(true);
       setErrorMsg(null);
 
-      const { data, error } = await supabase
+      // 1. Insert vé với trạng thái chờ ký quỹ (pending_deposit)
+      const { data: ticketData, error: ticketError } = await supabase
         .from("tickets")
         .insert({
           seller_id: currentUser.id,
           event_name: eventName.trim(),
           price: numPrice,
-          status: "available",
+          status: "pending_deposit",
           tier: tier.trim(),
           city: city.trim(),
           venue: venue.trim() || city.trim(),
@@ -81,54 +88,72 @@ export default function NewListing() {
         .select()
         .single();
 
-      if (error) {
-        console.error("Supabase insert ticket error:", error);
+      if (ticketError) throw ticketError;
+
+      // 2. Tạo bản ghi transaction chờ thanh toán cọc
+      if (ticketData?.id) {
+        await supabase.from("transactions").insert({
+          ticket_id: ticketData.id,
+          buyer_id: currentUser.id,
+          amount: depositAmount,
+          status: "pending",
+          reference_code: depositRefCode,
+        });
+
+        // 3. ĐĂNG KÝ SUPABASE REALTIME: Tự động nhận diện khi SePay webhook xác nhận thanh toán cọc thành công
+        const channel = supabase
+          .channel(`deposit_listener_${ticketData.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'transactions',
+              filter: `reference_code=eq.${depositRefCode}`,
+            },
+            (payload: any) => {
+              if (payload.new.status === 'paid') {
+                // Cập nhật trạng thái vé thành available trên sàn
+                supabase.from('tickets').update({ status: 'available' }).eq('id', ticketData.id);
+
+                const newListing = {
+                  id: Number(ticketData.id),
+                  eventId: 0,
+                  eventTitle: eventName.trim(),
+                  eventImage: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
+                  eventDate: eventDate.trim(),
+                  city: city.trim(),
+                  tier: tier.trim(),
+                  tierColor: "#A78BFA",
+                  section: tier.trim(),
+                  seat: "—",
+                  price: numPrice,
+                  officialPrice: numPrice,
+                  sellerName: currentProfile?.full_name || currentUser.email?.split("@")[0] || "Người bán chính chủ",
+                  sellerScore: 5.0,
+                  sellerReviews: 1,
+                  verified: true,
+                  minimapUrl: mapFile ? URL.createObjectURL(mapFile) : undefined,
+                };
+
+                setDynamicMarketListings([newListing, ...dynamicMarketListings]);
+                setDone(true);
+                supabase.removeChannel(channel);
+              }
+            }
+          )
+          .subscribe();
       }
 
-      if (data?.id) {
-        try {
-          await supabase.from("transactions").insert({
-            ticket_id: data.id,
-            buyer_id: currentUser.id,
-            amount: depositAmount,
-            status: "paid",
-            reference_code: depositRefCode,
-          });
-        } catch (txErr) {
-          console.warn("Tx record notice:", txErr);
-        }
-      }
-
-      const newListing = {
-        id: data ? Number(data.id) : Date.now(),
-        eventId: 0,
-        eventTitle: eventName.trim(),
-        eventImage: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
-        eventDate: eventDate.trim(),
-        city: city.trim(),
-        tier: tier.trim(),
-        tierColor: "#A78BFA",
-        section: tier.trim(),
-        seat: "—",
-        price: numPrice,
-        officialPrice: numPrice,
-        sellerName: currentProfile?.full_name || currentUser.email?.split("@")[0] || "Người bán chính chủ",
-        sellerScore: 5.0,
-        sellerReviews: 1,
-        verified: true,
-        minimapUrl: mapFile ? URL.createObjectURL(mapFile) : undefined,
-      };
-
-      setDynamicMarketListings([newListing, ...dynamicMarketListings]);
-      setDone(true);
+      setStep(3);
     } catch (err: any) {
-      setErrorMsg(err.message || "Đăng bán thất bại. Vui lòng thử lại.");
+      setErrorMsg(err.message || "Không thể khởi tạo phiên ký quỹ. Vui lòng thử lại.");
     } finally {
       setLoading(false);
     }
   };
 
-  const STEPS = ["1. Thông tin sự kiện", "2. Giá & Tệp vé", "3. Ký quỹ 25% & Niêm yết"];
+  const STEPS = ["1. Thông tin sự kiện", "2. Giá & Tệp vé", "3. Ký quỹ 25% tự động"];
 
   return (
     <>
@@ -137,7 +162,7 @@ export default function NewListing() {
           <button onClick={() => nav("seller-dash")} className="sp-btn-ghost text-xs px-3 py-1.5 cursor-pointer">
             ← Quay lại Bảng điều khiển
           </button>
-          <h1 className="font-display font-800 text-white text-xl">Đăng Bán Vé & Ký Quỹ Bảo Chứng</h1>
+          <h1 className="font-display font-800 text-white text-xl">Đăng Bán Vé & Ký Quỹ Tự Động</h1>
         </div>
 
         <div className="flex gap-0 mb-7 overflow-x-auto pb-1">
@@ -170,13 +195,13 @@ export default function NewListing() {
         {done ? (
           <div className="sp-card p-10 text-center">
             <div className="text-5xl mb-4">🎉</div>
-            <h2 className="font-display font-800 text-white text-2xl mb-2">Đăng Vé & Ký Quỹ Thành Công!</h2>
+            <h2 className="font-display font-800 text-white text-2xl mb-2">Nhận Diện Ký Quỹ Thành Công!</h2>
             <p className="text-sm mb-4 max-w-md mx-auto text-gray-300 leading-relaxed">
-              Vé sự kiện <strong className="text-purple-300">"{eventName}"</strong> đã được đưa lên hệ thống Chợ Vé SafePass và hiển thị công khai.
+              Hệ thống SePay đã tự động xác thực khoản cọc <strong className="text-amber-400">{fmt(depositAmount)}</strong>. Vé sự kiện <strong className="text-purple-300">"{eventName}"</strong> đã được tự động phát hành lên sàn Chợ Vé SafePass.
             </p>
             <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 max-w-md mx-auto text-xs text-purple-200 mb-6 space-y-1 text-left">
-              <p>• <strong>Số tiền cọc 25%:</strong> {fmt(depositAmount)} (đang được giữ trong quỹ Escrow).</p>
-              <p>• <strong>Khi bán thành công:</strong> Hệ thống tự động hoàn trả <strong className="text-emerald-400">100% tiền cọc + 95% giá trị vé</strong> ({fmt(payoutOnSale)}) vào số dư khả dụng của bạn.</p>
+              <p>• <strong>Trạng thái:</strong> Đang mở bán công khai.</p>
+              <p>• <strong>Khi bán thành công:</strong> Nhận ngay <strong className="text-emerald-400">{fmt(payoutOnSale)}</strong> (100% cọc + 95% tiền vé).</p>
             </div>
             <div className="flex gap-3 justify-center">
               <button
@@ -219,7 +244,7 @@ export default function NewListing() {
                       value={tier}
                       onChange={e => setTier(e.target.value)}
                       className="sp-input"
-                      placeholder="Ví dụ: VIP 1, GA Đứng, CAT 2..."
+                      placeholder="Ví dụ: VIP 1, GA Đứng..."
                     />
                   </div>
                   <div>
@@ -381,47 +406,79 @@ export default function NewListing() {
                   </div>
                 </div>
 
+                {errorMsg && (
+                  <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
+                    ⚠️ {errorMsg}
+                  </div>
+                )}
+
+                <div className="flex items-start gap-2.5 my-2">
+                  <input
+                    type="checkbox"
+                    id="terms-check-seller"
+                    checked={agreedTerms}
+                    onChange={(e) => setAgreedTerms(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#13132a] text-purple-600 focus:ring-purple-500 cursor-pointer shrink-0"
+                  />
+                  <label htmlFor="terms-check-seller" className="text-xs text-gray-400 leading-relaxed cursor-pointer">
+                    Tôi đã đọc và đồng ý với{" "}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); setShowTerms(true); }}
+                      className="text-purple-400 hover:text-purple-300 font-bold underline transition-colors"
+                    >
+                      Điều khoản & Chính sách giao dịch
+                    </button>
+                    {" "}của nền tảng.
+                  </label>
+                </div>
+
                 <div className="flex gap-3">
                   <button onClick={() => setStep(1)} className="flex-1 sp-btn-ghost py-3.5 font-display font-700 cursor-pointer">
                     ← Quay lại Bước 1
                   </button>
                   <button
-                    onClick={() => setStep(3)}
-                    disabled={!step2Valid}
+                    onClick={handleProceedToStep3}
+                    disabled={!step2Valid || !agreedTerms || loading}
                     className="flex-1 sp-btn-primary py-3.5 font-display font-700 cursor-pointer disabled:opacity-40"
                   >
-                    Tiếp tục: Ký quỹ cọc 25% →
+                    {loading ? "Đang tạo phiên ký quỹ..." : "Tạo mã QR cọc & Chờ thanh toán →"}
                   </button>
                 </div>
               </div>
             )}
 
             {step === 3 && (
-              <div className="space-y-5">
-                <div className="flex items-center justify-between pb-3 border-b border-white/5">
+              <div className="space-y-5 text-center">
+                <div className="flex items-center justify-between pb-3 border-b border-white/5 text-left">
                   <div>
-                    <h2 className="font-display font-800 text-white text-base">Bước 3: Chuyển khoản Ký Quỹ 25% Giá Trị Vé</h2>
-                    <p className="text-xs text-amber-400 font-semibold mt-0.5">Căn cứ Điều 328 Bộ luật Dân sự 2015</p>
+                    <h2 className="font-display font-800 text-white text-base">Bước 3: Đang chờ thanh toán ký quỹ tự động</h2>
+                    <p className="text-xs text-amber-400 font-semibold mt-0.5">Hệ thống SePay đang lắng nghe giao dịch chuyển khoản</p>
                   </div>
                   <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/25 font-bold">
                     Cọc: {fmt(depositAmount)}
                   </span>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 leading-relaxed">
-                  🛡️ <strong>Cơ chế bảo vệ ký quỹ:</strong> Người bán chuyển khoản cọc 25% giá trị vé để hệ thống bảo chứng. Nội dung bắt đầu bằng <strong className="text-amber-300">SAFEPASS KYQUY</strong> để tự động hóa đối soát với SePay Webhook.
+                <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 text-left leading-relaxed">
+                  🔄 <strong>Đang chờ SePay Webhook tự động nhận diện:</strong> Vui lòng quét mã QR bên dưới bằng App Ngân hàng với đúng nội dung <strong className="text-amber-300">{depositRefCode}</strong>. Ngay khi tiền vào tài khoản, hệ thống sẽ tự động đưa vé lên sàn mà không cần bấm nút xác nhận nào!
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center p-4 rounded-2xl bg-[#080816] border border-white/8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center p-4 rounded-2xl bg-[#080816] border border-white/8 text-left">
                   <div className="flex flex-col items-center justify-center">
-                    <div className="bg-white p-2.5 rounded-2xl shadow-xl mb-2">
+                    <div className="bg-white p-2.5 rounded-2xl shadow-xl mb-2 relative">
                       {depositQrUrl ? (
-                        <img
-                          src={depositQrUrl}
-                          alt="QR Ký Quỹ SafePass"
-                          className="rounded-xl"
-                          style={{ width: 190, height: 190 }}
-                        />
+                        <>
+                          <img
+                            src={depositQrUrl}
+                            alt="QR Ký Quỹ SafePass"
+                            className="rounded-xl"
+                            style={{ width: 190, height: 190 }}
+                          />
+                          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] rounded-xl flex flex-col items-center justify-center text-white text-xs font-bold animate-pulse">
+                            <span>⏳ Đang chờ thanh toán...</span>
+                          </div>
+                        </>
                       ) : (
                         <div className="w-[190px] h-[190px] flex items-center justify-center text-xs text-gray-500">
                           Đang tạo mã VietQR cọc...
@@ -430,7 +487,7 @@ export default function NewListing() {
                     </div>
                     <p className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
                       <span>📱</span>
-                      <span>Quét QR bằng App Ngân hàng để cọc tự động</span>
+                      <span>Hệ thống tự động nhận diện sau khi chuyển khoản</span>
                     </p>
                   </div>
 
@@ -501,43 +558,9 @@ export default function NewListing() {
                   </div>
                 </div>
 
-                {errorMsg && (
-                  <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
-                    ⚠️ {errorMsg}
-                  </div>
-                )}
-
-                <div className="flex items-start gap-2.5 my-2">
-                  <input
-                    type="checkbox"
-                    id="terms-check-seller"
-                    checked={agreedTerms}
-                    onChange={(e) => setAgreedTerms(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#13132a] text-purple-600 focus:ring-purple-500 cursor-pointer shrink-0"
-                  />
-                  <label htmlFor="terms-check-seller" className="text-xs text-gray-400 leading-relaxed cursor-pointer">
-                    Tôi đã đọc và đồng ý với{" "}
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); setShowTerms(true); }}
-                      className="text-purple-400 hover:text-purple-300 font-bold underline transition-colors"
-                    >
-                      Điều khoản & Chính sách giao dịch
-                    </button>
-                    {" "}của nền tảng. Tôi hiểu rằng tiền cọc 25% sẽ được hoàn trả 100% khi bán thành công.
-                  </label>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button onClick={() => setStep(2)} className="sp-btn-ghost py-3.5 px-5 font-display font-700 cursor-pointer">
-                    ← Quay lại
-                  </button>
-                  <button
-                    onClick={handleConfirmDepositAndPublish}
-                    disabled={!agreedTerms || loading}
-                    className="flex-1 sp-btn-primary py-3.5 font-display font-700 text-sm disabled:opacity-50 cursor-pointer"
-                  >
-                    {loading ? "Đang xác nhận ký quỹ & Niêm yết vé..." : "✓ Xác Nhận Đã Ký Quỹ & Niêm Yết Vé Lên Sàn"}
+                <div className="pt-2 flex justify-start">
+                  <button onClick={() => setStep(2)} className="sp-btn-ghost py-2.5 px-4 text-xs font-display font-700 cursor-pointer">
+                    ← Quay lại sửa thông tin
                   </button>
                 </div>
               </div>

@@ -210,25 +210,8 @@ export const TICKET_LISTINGS: TicketListing[] = [
   },
 ];
 
-export const MY_TICKETS: MyTicket[] = [
-  {
-    id: 1,
-    eventTitle: "Anh Trai Vượt Ngàn Chông Gai – Đêm Gala 2026",
-    eventImage: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop&auto=format",
-    tier: "GA Đứng", date: "05 Tháng 11, 2026 · 19:30",
-    venue: "Nhà thi đấu Phú Thọ, TP.HCM", price: 950000, status: "locked",
-  },
-  {
-    id: 2,
-    eventTitle: "Saigon Electronic Music Festival 2026",
-    eventImage: "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&h=400&fit=crop&auto=format",
-    tier: "VIP Lounge", date: "15 Tháng 12, 2026 · 18:00",
-    venue: "Landmark 81 Rooftop, TP.HCM", price: 980000, status: "completed",
-  },
-];
+// Đã xóa sạch vé mẫu để đồng bộ hoàn toàn với Supabase
+export const MY_TICKETS: MyTicket[] = [];
 
-export const MY_LISTINGS: MyListing[] = [
-  { id: 1, eventTitle: "BLACKPINK World Tour – Born Pink Final", tier: "Zone B", price: 1100000, status: "available", date: "20 Tháng 10, 2026" },
-  { id: 2, eventTitle: "Sơn Tùng M-TP – Sky Tour Live", tier: "Gold", price: 1700000, status: "locked", date: "22 Tháng 11, 2026" },
-  { id: 3, eventTitle: "Saigon Electronic Music Festival", tier: "VIP Lounge", price: 980000, status: "completed", date: "15 Tháng 12, 2026" },
-];
+// Đã xóa sạch danh sách niêm yết mẫu để đồng bộ hoàn toàn với Supabase
+export const MY_LISTINGS: MyListing[] = [];
