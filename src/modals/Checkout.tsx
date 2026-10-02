@@ -19,7 +19,6 @@ export default function CheckoutModal() {
   );
   const [qrReady, setQrReady] = useState(true);
   const [paymentStatus, setPaymentStatus] = useState<"pending" | "paid">("pending");
-  const [isVerifying, setIsVerifying] = useState(false);
 
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedAcc, setCopiedAcc] = useState(false);
@@ -87,7 +86,7 @@ export default function CheckoutModal() {
 
     initTransaction();
 
-    // Tự động kiểm tra trạng thái thanh toán từ SePay Webhook mỗi 2.5 giây
+    // Tự động kiểm tra trạng thái thanh toán từ SePay Webhook mỗi 2 giây
     const pollTimer = setInterval(async () => {
       if (!code) return;
       try {
@@ -97,16 +96,38 @@ export default function CheckoutModal() {
           .eq("reference_code", code)
           .maybeSingle();
 
-        if (tx && tx.status === "paid") {
+        if (tx && (tx.status === "paid" || tx.status === "completed")) {
+          clearInterval(pollTimer);
           completePurchase();
         }
       } catch (err) {
         // im lặng nếu lỗi mạng
       }
-    }, 2500);
+    }, 2000);
+
+    // Kênh Supabase Realtime phản hồi ngay lập tức khi SePay Webhook cập nhật transactions
+    const channel = supabase
+      .channel(`tx_${code}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "transactions",
+          filter: `reference_code=eq.${code}`,
+        },
+        (payload: any) => {
+          if (payload?.new?.status === "paid" || payload?.new?.status === "completed") {
+            clearInterval(pollTimer);
+            completePurchase();
+          }
+        }
+      )
+      .subscribe();
 
     return () => {
       clearInterval(pollTimer);
+      supabase.removeChannel(channel);
     };
   }, [checkoutTicket?.id, activeUserId]);
 
@@ -124,7 +145,7 @@ export default function CheckoutModal() {
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${total}&addInfo=${refCode}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  // HÀM HOÀN TẤT GIAO DỊCH TÁCH BIỆT 100% 2 LUỒNG
+  // HÀM HOÀN TẤT GIAO DỊCH TÁCH BIỆT 100% 2 LUỒNG (CHỈ CHẠY KHI NHẬN ĐƯỢC XÁC NHẬN TIỀN VÀO TỪ SEPAY WEBHOOK)
   const completePurchase = async () => {
     setPaymentStatus("paid");
 
@@ -160,14 +181,6 @@ export default function CheckoutModal() {
     }
 
     setDone(true);
-  };
-
-  const handleManualVerify = async () => {
-    setIsVerifying(true);
-    setTimeout(() => {
-      completePurchase();
-      setIsVerifying(false);
-    }, 1200);
   };
 
   return (
@@ -341,17 +354,13 @@ export default function CheckoutModal() {
                     </div>
                   </div>
 
-                  <p className="text-[11px] text-gray-400 text-center mt-2.5">
-                    ⚡ Hệ thống tự động xác nhận qua SePay Webhook khi nhận chuyển khoản
-                  </p>
-
-                  <button
-                    onClick={handleManualVerify}
-                    disabled={isVerifying}
-                    className="mt-3 w-full sp-btn-primary py-3 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-50"
-                  >
-                    {isVerifying ? "Đang xác thực giao dịch..." : "✅ Đã chuyển khoản - Kiểm tra thanh toán ngay"}
-                  </button>
+                  <div className="mt-3.5 w-full p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/25 flex items-center justify-center gap-3">
+                    <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                    <div className="text-left">
+                      <p className="text-xs font-display font-700 text-purple-200">Đang lắng nghe biến động SePay...</p>
+                      <p className="text-[10px] text-gray-400">Hệ thống tự động kích hoạt ngay khi tài khoản nhận được tiền</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
