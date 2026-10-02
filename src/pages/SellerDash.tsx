@@ -52,20 +52,22 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
     setConfirmed(true);
   };
 
-  if (confirmed) return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }}>
-      <div className="sp-card p-8 max-w-md w-full text-center space-y-4">
-        <div className="text-5xl">✅</div>
-        <h2 className="font-display font-800 text-white text-xl">Yêu cầu rút tiền đã được gửi!</h2>
-        <p className="text-sm text-gray-300 leading-relaxed">
-          Số tiền <strong className="text-emerald-400">{fmt(numAmount)}</strong> sẽ được chuyển vào tài khoản {bank} ({accountNum} - {accountName}) của bạn trong vòng 1-2 giờ làm việc.
-        </p>
-        <button onClick={onClose} className="sp-btn-primary w-full py-3 font-display font-700 cursor-pointer">
-          Đóng
-        </button>
+  if (confirmed) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }}>
+        <div className="sp-card p-8 max-w-md w-full text-center space-y-4">
+          <div className="text-5xl">✅</div>
+          <h2 className="font-display font-800 text-white text-xl">Yêu cầu rút tiền đã được gửi!</h2>
+          <p className="text-sm text-gray-300 leading-relaxed">
+            Số tiền <strong className="text-emerald-400">{fmt(numAmount)}</strong> sẽ được chuyển vào tài khoản {bank} ({accountNum} - {accountName}) của bạn trong vòng 1-2 giờ làm việc.
+          </p>
+          <button onClick={onClose} className="sp-btn-primary w-full py-3 font-display font-700 cursor-pointer">
+            Đóng
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }} onClick={onClose}>
@@ -238,8 +240,9 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
           </p>
         )}
       </div>
-    );
-  }
+    </div>
+  );
+}
 
 export default function SellerDash() {
   const { nav, kycStatus, currentProfile, currentUser, refreshProfile, t } = useApp();
@@ -248,7 +251,6 @@ export default function SellerDash() {
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
   const [sellerDisputes, setSellerDisputes] = useState<any[]>([]);
 
-  // FORM TÀI KHOẢN NGÂN HÀNG NHẬP TAY
   const [bankName, setBankName] = useState("Vietcombank");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountHolder, setAccountHolder] = useState("");
@@ -257,7 +259,6 @@ export default function SellerDash() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // ĐỒNG BỘ DỮ LIỆU TỪ CURRENT PROFILE LÊN FORM
   useEffect(() => {
     if (currentProfile) {
       setBankName(currentProfile.bank_name || "Vietcombank");
@@ -315,7 +316,6 @@ export default function SellerDash() {
     };
   }, [currentUser]);
 
-  // HÀM LƯU TÀI KHOẢN NGÂN HÀNG (LƯU VÀO SUPABASE & ĐỒNG BỘ TỨC THÌ)
   const handleSaveBankInfo = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -338,7 +338,7 @@ export default function SellerDash() {
 
         if (error) throw error;
 
-        await refreshProfile(); // Kích hoạt đồng bộ sang Profile View ngay lập tức
+        await refreshProfile();
         setSuccessMsg("✓ Đã lưu và đồng bộ tài khoản ngân hàng thành công!");
       }
     } catch (err: any) {
@@ -394,7 +394,6 @@ export default function SellerDash() {
         />
       )}
 
-      {/* CẢNH BÁO TRANH CHẤP */}
       {sellerDisputes.length > 0 && (
         <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -447,7 +446,6 @@ export default function SellerDash() {
         ))}
       </div>
 
-      {/* FORM NHẬP TAY TÀI KHOẢN NGÂN HÀNG (ĐÃ BỎ HOÀN TOÀN QUÉT API) */}
       <div className="sp-card p-6 mb-6">
         <div className="pb-4 border-b border-white/5 mb-4">
           <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
