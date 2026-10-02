@@ -3,7 +3,7 @@ import { useApp } from "../context";
 import SafePassLogo from "./Logo";
 
 export default function Navbar() {
-  const { role, setRole, cartCount, nav, isLoggedIn, setIsLoggedIn, setAuthModal, currentProfile, currentUser, lang, setLang, t, registeredUsers, setShowUsersModal } = useApp();
+  const { role, setRole, cartCount, nav, isLoggedIn, setIsLoggedIn, setAuthModal, currentProfile, currentUser, t, registeredUsers, setShowUsersModal } = useApp();
   const [search, setSearch] = useState("");
   const [showUserMenu, setShowUserMenu] = useState(false);
 
@@ -50,36 +50,6 @@ export default function Navbar() {
             {t.sellTickets}
           </button>
         </div>
-
-        {/* Lang toggle */}
-        <button
-          onClick={() => setLang(lang === "vi" ? "en" : "vi")}
-          title={lang === "vi" ? "Switch to English" : "Chuyển sang Tiếng Việt"}
-          style={{
-            padding: "0.38rem 0.7rem",
-            borderRadius: "10px",
-            background: "#13132a",
-            border: "1px solid rgba(255,255,255,0.07)",
-            color: "#9ca3af",
-            fontFamily: "'Bricolage Grotesque', sans-serif",
-            fontSize: "0.78rem",
-            fontWeight: 700,
-            cursor: "pointer",
-            flexShrink: 0,
-            transition: "all 0.15s",
-            letterSpacing: "0.03em",
-          }}
-          onMouseEnter={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#fff";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.18)";
-          }}
-          onMouseLeave={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#9ca3af";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.07)";
-          }}
-        >
-          {lang === "vi" ? "🇺🇸 EN" : "🇻🇳 VI"}
-        </button>
 
         {/* Cart */}
         <button className="sp-cart-btn" onClick={() => { if (isLoggedIn) nav("my-tickets"); else setAuthModal("login"); }}>

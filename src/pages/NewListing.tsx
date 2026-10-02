@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useApp } from "../context";
 import { supabase } from "../lib/supabaseClient";
+import { FaceIDVerification } from "../components/FaceIDVerification";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 export default function NewListing() {
   const { nav, dynamicMarketListings, setDynamicMarketListings, setRole, currentUser, currentProfile, setAuthModal, t } = useApp();
+  
+  // State quản lý quét FaceID
+  const [isFaceScanned, setIsFaceScanned] = useState(false);
+  
   const [step, setStep] = useState(1);
 
   const [eventName, setEventName] = useState("");
@@ -89,6 +94,29 @@ export default function NewListing() {
   };
 
   const STEPS = [t.step1Label, t.step2Label, t.step3Label];
+
+  // Logic Render: Chặn bằng FaceID nếu chưa quét
+  if (!isFaceScanned) {
+      return (
+          <div className="max-w-3xl mx-auto px-5 lg:px-8 py-10 relative">
+              {/* Lớp phủ mờ (blur) form phía sau để cho thấy tính "bắt buộc" */}
+              <div className="absolute inset-0 backdrop-blur-md bg-black/40 z-10 flex items-center justify-center p-4 rounded-xl">
+                 <FaceIDVerification onVerified={() => setIsFaceScanned(true)} />
+              </div>
+              
+              {/* Form mờ ảo bên dưới */}
+              <div className="opacity-30 pointer-events-none">
+                  <div className="flex items-center gap-3 mb-6">
+                    <button className="sp-btn-ghost text-xs px-3 py-1.5">{t.backBtn}</button>
+                    <h1 className="font-display font-800 text-white text-xl">{t.newListingTitle}</h1>
+                  </div>
+                  <div className="sp-card p-6 h-96 flex items-center justify-center">
+                       <p>Nội dung form đã bị khóa...</p>
+                  </div>
+              </div>
+          </div>
+      )
+  }
 
   return (
     <div className="max-w-3xl mx-auto px-5 lg:px-8 py-10">
