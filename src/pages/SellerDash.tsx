@@ -58,7 +58,6 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
       return;
     }
 
-    // Strict KYC Name Match validation for Seller
     const registeredName = normalizeName(currentProfile?.full_name || "");
     const inputHolder = normalizeName(accountName);
 
@@ -74,7 +73,6 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
       return;
     }
 
-    // Save bank details to profile
     if (currentProfile?.id) {
       try {
         await supabase.from("profiles").update({
@@ -211,9 +209,30 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
   );
 }
 
-function DetailModal({ listing, onClose }: { listing: MyListing; onClose: () => void }) {
+function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onClose: () => void; onDeleted: (id: number) => void }) {
   const cfg = STATUS_CFG[listing.status] || STATUS_CFG.available;
-  const [cancelled, setCancelled] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleDeleteListing = async () => {
+    if (!window.confirm("Bạn có chắc chắn muốn hủy và xóa niêm yết vé này không?")) return;
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const { error } = await supabase
+        .from("tickets")
+        .delete()
+        .eq("id", listing.id);
+
+      if (error) throw error;
+
+      onDeleted(listing.id);
+      onClose();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Không thể hủy và xóa niêm yết vé.");
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)" }} onClick={onClose}>
@@ -244,21 +263,24 @@ function DetailModal({ listing, onClose }: { listing: MyListing; onClose: () => 
           </div>
         </div>
 
-        {cancelled ? (
-          <div className="text-center py-3">
-            <p className="text-sm font-display font-700 text-lime-400">Đã hủy niêm yết vé</p>
+        {errorMsg && (
+          <div className="mb-4 p-2.5 text-xs bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg">
+            ⚠️ {errorMsg}
           </div>
-        ) : listing.status === "available" ? (
+        )}
+
+        {listing.status === "available" ? (
           <button
-            onClick={() => setCancelled(true)}
-            className="w-full py-3 rounded-xl font-display font-700 text-sm transition-all cursor-pointer"
+            onClick={handleDeleteListing}
+            disabled={loading}
+            className="w-full py-3 rounded-xl font-display font-700 text-sm transition-all cursor-pointer disabled:opacity-50"
             style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)", color: "#F87171" }}
           >
-            Hủy niêm yết vé
+            {loading ? "Đang xử lý..." : "Hủy và xóa niêm yết vé"}
           </button>
         ) : (
           <p className="text-xs text-center text-gray-400">
-            {listing.status === "locked" ? "Vé đang được giao dịch (Tạm khóa)." : "Vé đã bán thành công."}
+            {listing.status === "locked" ? "Vé đang được giao dịch (Tạm khóa, không thể hủy)." : "Vé đã bán thành công, không thể hủy."}
           </p>
         )}
       </div>
@@ -272,7 +294,6 @@ export default function SellerDash() {
   const [detailListing, setDetailListing] = useState<MyListing | null>(null);
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
 
-  // Seller Bank Update Card State with Edge Function & Napas API Lookup
   const [bankCode, setBankCode] = useState(currentProfile?.bank_name || "MB Bank");
   const [accountNumber, setAccountNumber] = useState(currentProfile?.bank_account || "");
   const [manualHolderInput, setManualHolderInput] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "");
@@ -320,7 +341,6 @@ export default function SellerDash() {
     loadSellerTickets();
   }, [currentUser]);
 
-  // Handle Bank Verification with Edge Function / Interbank API + Strict Name Check
   const handleVerifyAndSaveBank = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -334,7 +354,6 @@ export default function SellerDash() {
     try {
       let bankAccountHolder = "";
 
-      // 1. Gọi Supabase Edge Function để tra cứu tên thật từ hệ thống ngân hàng qua SePay
       try {
         const { data, error } = await supabase.functions.invoke("lookup-bank", {
           body: { bankCode, accountNumber: accountNumber.trim() },
@@ -347,7 +366,6 @@ export default function SellerDash() {
         console.warn("Edge function notice:", fnErr);
       }
 
-      // Fallback: Tra cứu qua Napas / VietQR lookup API nếu Edge Function chưa deploy
       if (!bankAccountHolder) {
         try {
           const bin = BANK_BINS[bankCode] || "970422";
@@ -365,17 +383,14 @@ export default function SellerDash() {
         }
       }
 
-      // Fallback nếu ngân hàng không hỗ trợ API: dùng tên nhập
       if (!bankAccountHolder) {
         bankAccountHolder = manualHolderInput.trim().toUpperCase();
       }
 
-      // Lấy tên định danh trên CCCD / eKYC của người dùng
       const registeredName = (currentProfile?.full_name || "").toUpperCase().trim();
       const normRegistered = normalizeName(registeredName);
       const normHolder = normalizeName(bankAccountHolder);
 
-      // 2. So sánh tên chủ tài khoản với tên CCCD
       if (normRegistered && normHolder && normHolder !== normRegistered) {
         setErrorMsg(
           `Tên chủ tài khoản ngân hàng ("${bankAccountHolder}") KHÔNG KHỚP với tên trên CCCD ("${registeredName}"). Vui lòng dùng tài khoản chính chủ!`
@@ -383,7 +398,6 @@ export default function SellerDash() {
         return;
       }
 
-      // 3. Khớp hoàn toàn -> Tiến hành lưu thông tin ngân hàng vào Database
       const finalHolder = bankAccountHolder || registeredName;
       setSuccessMsg(`✓ Xác thực thành công! Chủ tài khoản chính chủ: ${finalHolder}`);
 
@@ -404,7 +418,6 @@ export default function SellerDash() {
 
   const allSellerListings = sellerTickets;
 
-  // KYC persists once completed
   const isKycApproved =
     kycStatus === "approved" ||
     currentProfile?.kyc_status === "approved" ||
@@ -430,8 +443,6 @@ export default function SellerDash() {
 
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
   const soldListings = allSellerListings.filter(l => l.status === "completed");
-  
-  // Available balance = 95% price + 100% deposit for sold tickets
   const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
 
   const STATS = [
@@ -443,7 +454,13 @@ export default function SellerDash() {
   return (
     <div className="max-w-[1680px] mx-auto px-5 lg:px-8 py-8">
       {showWithdraw && <WithdrawModal balance={availableBalance} onClose={() => setShowWithdraw(false)} />}
-      {detailListing && <DetailModal listing={detailListing} onClose={() => setDetailListing(null)} />}
+      {detailListing && (
+        <DetailModal 
+          listing={detailListing} 
+          onClose={() => setDetailListing(null)} 
+          onDeleted={(deletedId) => setSellerTickets(prev => prev.filter(item => item.id !== deletedId))}
+        />
+      )}
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-7">
         <div>
@@ -475,7 +492,6 @@ export default function SellerDash() {
         ))}
       </div>
 
-      {/* Seller Bank Account Setup with Edge Function & Napas API Verification */}
       <div className="sp-card p-6 mb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-4 border-b border-white/5 mb-4">
           <div>
