@@ -14,6 +14,7 @@ const STATUS_CFG = {
   disputed:        { label: "🚨 TRANH CHẤP (ĐÃ KHÓA TIỀN VÉ NÀY)", color: "#F87171", bg: "rgba(248,113,113,0.15)" },
 } as const;
 
+// POPUP YÊU CẦU RÚT TIỀN
 function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
   const { currentProfile, refreshProfile } = useApp();
   const [bank, setBank] = useState(currentProfile?.bank_name || "Vietcombank");
@@ -170,7 +171,7 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
   );
 }
 
-// POPUP CHI TIẾT VÉ & BỔ SUNG NÚT ĐÓNG CỌC
+// POPUP CHI TIẾT VÉ & NÚT ĐÓNG CỌC MỞ BÁN
 function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onClose: () => void; onDeleted: (id: number) => void }) {
   const { setCheckoutTicket } = useApp();
   const cfg = STATUS_CFG[listing.status as keyof typeof STATUS_CFG] || STATUS_CFG.available;
@@ -198,14 +199,15 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
 
   const handlePayDepositNow = () => {
     onClose();
-    // Mở Checkout Modal đóng cọc 25%
+    // Mở Modal VietQR để thanh toán đúng 25% cọc
     setCheckoutTicket({
       id: listing.id,
       eventTitle: listing.eventTitle,
-      price: depositAmount, // Đặt số tiền thanh toán là đúng 25% cọc
+      price: depositAmount,
       tier: `Cọc ký quỹ (25%): ${listing.tier}`,
       eventDate: listing.date,
-      isDeposit: true, // Đánh dấu là giao dịch đóng cọc
+      venue: "SafePass Escrow System",
+      isDeposit: true, // Kích hoạt luồng dành cho Người Bán Đóng Cọc
     });
   };
 
@@ -244,7 +246,7 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
           </div>
         )}
 
-        {/* NÚT THANH TOÁN CỌC DÀNH RIÊNG CHO VÉ PENDING_DEPOSIT */}
+        {/* NÚT THANH TOÁN CỌC NẾU VÉ ĐANG CHỜ CỌC */}
         {listing.status === "pending_deposit" ? (
           <div className="space-y-2 pt-2 border-t border-white/10">
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
@@ -283,6 +285,7 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
   );
 }
 
+// COMPONENT CHÍNH
 export default function SellerDash() {
   const { nav, kycStatus, currentProfile, currentUser, refreshProfile, t } = useApp();
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -290,6 +293,8 @@ export default function SellerDash() {
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
   const [sellerDisputes, setSellerDisputes] = useState<any[]>([]);
 
+  // TÍCH HỢP ĐẦY ĐỦ THÔNG TIN LIÊN HỆ & NGÂN HÀNG
+  const [phone, setPhone] = useState("");
   const [bankName, setBankName] = useState("Vietcombank");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountHolder, setAccountHolder] = useState("");
@@ -298,13 +303,15 @@ export default function SellerDash() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // ĐỒNG BỘ DỮ LIỆU TỪ PROFILE/AUTH
   useEffect(() => {
     if (currentProfile) {
+      setPhone(currentProfile.phone || currentUser?.phone || "");
       setBankName(currentProfile.bank_name || "Vietcombank");
       setAccountNumber(currentProfile.bank_account || "");
       setAccountHolder(currentProfile.bank_holder || currentProfile.full_name || "");
     }
-  }, [currentProfile]);
+  }, [currentProfile, currentUser]);
 
   useEffect(() => {
     const uid = currentUser?.id;
@@ -324,7 +331,6 @@ export default function SellerDash() {
             eventTitle: t.event_name,
             tier: t.tier || "Standard",
             price: Number(t.price),
-            // Đọc chính xác trạng thái pending_deposit
             status: t.status === "pending_deposit" ? "pending_deposit" : t.status === "disputed" ? "disputed" : t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
             date: t.event_date || "Sắp diễn ra",
           }));
@@ -356,33 +362,48 @@ export default function SellerDash() {
     };
   }, [currentUser]);
 
+  // HÀM LƯU TÀI KHOẢN & SĐT (ĐỒNG BỘ PROFILES VÀ AUTH)
   const handleSaveBankInfo = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    if (!accountNumber.trim()) {
-      setErrorMsg("Vui lòng nhập số tài khoản ngân hàng!");
+    if (!accountNumber.trim() || !phone.trim() || !accountHolder.trim()) {
+      setErrorMsg("Vui lòng nhập đầy đủ Số điện thoại, Số tài khoản và Tên chủ tài khoản!");
       return;
     }
 
     setLoading(true);
     try {
+      const holderName = accountHolder.trim().toUpperCase() || (currentProfile?.full_name || "").toUpperCase();
+
+      // Lưu vào profiles table
       if (currentProfile?.id) {
-        const holderName = accountHolder.trim().toUpperCase() || (currentProfile.full_name || "").toUpperCase();
-        
-        const { error } = await supabase.from("profiles").update({
+        const { error: profileErr } = await supabase.from("profiles").update({
+          phone: phone.trim(),
           bank_name: bankName,
           bank_account: accountNumber.trim(),
           bank_holder: holderName,
         }).eq("id", currentProfile.id);
 
-        if (error) throw error;
-
-        await refreshProfile();
-        setSuccessMsg("✓ Đã lưu và đồng bộ tài khoản ngân hàng thành công!");
+        if (profileErr) {
+          console.warn("Lỗi lưu profiles:", profileErr.message);
+        }
       }
+
+      // Lưu dự phòng vào Auth metadata
+      await supabase.auth.updateUser({
+        data: {
+          phone: phone.trim(),
+          bank_name: bankName,
+          bank_account: accountNumber.trim(),
+          bank_holder: holderName,
+        }
+      });
+
+      await refreshProfile();
+      setSuccessMsg("✓ Đã lưu và đồng bộ Thông Tin Liên Hệ & Tài Khoản Ngân Hàng thành công!");
     } catch (err: any) {
-      setErrorMsg(err.message || "Lỗi khi lưu thông tin ngân hàng.");
+      setErrorMsg(err.message || "Lỗi khi lưu thông tin.");
     } finally {
       setLoading(false);
     }
@@ -413,7 +434,7 @@ export default function SellerDash() {
     );
   }
 
-  // CHỈ ĐẾM VÉ 'available' LÀ ĐANG MỞ BÁN
+  // THỐNG KÊ (Chỉ đếm vé available là đang mở bán)
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
   const soldListings = allSellerListings.filter(l => l.status === "completed");
   const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
@@ -435,6 +456,7 @@ export default function SellerDash() {
         />
       )}
 
+      {/* CẢNH BÁO TRANH CHẤP */}
       {sellerDisputes.length > 0 && (
         <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -457,6 +479,7 @@ export default function SellerDash() {
         </div>
       )}
 
+      {/* HEADER BẢNG ĐIỀU KHIỂN */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-7">
         <div>
           <h1 className="font-display font-800 text-white text-2xl">{t.sellerDashTitle}</h1>
@@ -487,20 +510,31 @@ export default function SellerDash() {
         ))}
       </div>
 
+      {/* FORM THÔNG TIN LIÊN HỆ & NGÂN HÀNG (CÓ THÊM SĐT) */}
       <div className="sp-card p-6 mb-6">
         <div className="pb-4 border-b border-white/5 mb-4">
           <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
             <span>🏦</span>
-            <span>Tài Khoản Ngân Hàng Nhận Tiền Bán Vé / Hoàn Cọc</span>
+            <span>Thông Tin Liên Hệ & Tài Khoản Nhận Tiền</span>
           </h2>
           <p className="text-xs text-gray-400 mt-1">
-            Tài khoản ngân hàng dùng để SafePass giải ngân tiền bán vé và hoàn trả lại tiền cọc ký quỹ.
+            Số điện thoại liên hệ và tài khoản ngân hàng để hệ thống SafePass tự động giải ngân hoặc hoàn cọc.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng</label>
+            <label className="sp-filter-label mb-1.5 block">Số điện thoại liên hệ *</label>
+            <input
+              type="text"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              className="sp-input font-mono"
+              placeholder="Nhập số điện thoại..."
+            />
+          </div>
+          <div>
+            <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng *</label>
             <select value={bankName} onChange={e => setBankName(e.target.value)} className="sp-select">
               <option value="Vietcombank">Vietcombank</option>
               <option value="MB Bank">MB Bank (Quân Đội)</option>
@@ -512,9 +546,11 @@ export default function SellerDash() {
               <option value="Vietinbank">Vietinbank</option>
             </select>
           </div>
+        </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng</label>
+            <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng *</label>
             <input
               type="text"
               value={accountNumber}
@@ -523,9 +559,8 @@ export default function SellerDash() {
               placeholder="Nhập số tài khoản ngân hàng..."
             />
           </div>
-
           <div>
-            <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản (Khớp với người bán)</label>
+            <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản (Khớp với CCCD) *</label>
             <input
               type="text"
               value={accountHolder}
@@ -554,7 +589,7 @@ export default function SellerDash() {
             disabled={loading}
             className="sp-btn-primary px-6 py-2.5 font-display font-700 text-xs cursor-pointer shadow-lg disabled:opacity-40"
           >
-            {loading ? "Đang lưu..." : "Lưu & Đồng Bộ Tài Khoản Ngân Hàng"}
+            {loading ? "Đang lưu..." : "Lưu & Đồng Bộ Thông Tin"}
           </button>
         </div>
       </div>
