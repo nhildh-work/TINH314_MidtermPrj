@@ -86,28 +86,53 @@ export default function CheckoutModal() {
 
     initTransaction();
 
-    // Tự động kiểm tra trạng thái thanh toán từ SePay Webhook mỗi 2 giây
+    // Tự động kiểm tra trạng thái thanh toán từ SePay Webhook mỗi 1.5 giây
     const pollTimer = setInterval(async () => {
-      if (!code) return;
       try {
-        const { data: tx } = await supabase
-          .from("transactions")
-          .select("status")
-          .eq("reference_code", code)
-          .maybeSingle();
+        // 1. Kiểm tra qua transactions
+        if (code) {
+          const { data: tx } = await supabase
+            .from("transactions")
+            .select("status")
+            .eq("reference_code", code)
+            .maybeSingle();
 
-        if (tx && (tx.status === "paid" || tx.status === "completed")) {
-          clearInterval(pollTimer);
-          completePurchase();
+          if (tx && (tx.status === "paid" || tx.status === "completed")) {
+            clearInterval(pollTimer);
+            completePurchase();
+            return;
+          }
+        }
+
+        // 2. Kiểm tra trực tiếp bảng tickets (luôn đọc được ngay cả khi transactions bị RLS)
+        if (checkoutTicket && checkoutTicket.id) {
+          const { data: t } = await supabase
+            .from("tickets")
+            .select("status")
+            .eq("id", checkoutTicket.id)
+            .maybeSingle();
+
+          if (t) {
+            if (isDepositTx && t.status === "available") {
+              clearInterval(pollTimer);
+              completePurchase();
+              return;
+            }
+            if (!isDepositTx && t.status === "sold") {
+              clearInterval(pollTimer);
+              completePurchase();
+              return;
+            }
+          }
         }
       } catch (err) {
         // im lặng nếu lỗi mạng
       }
-    }, 2000);
+    }, 1500);
 
-    // Kênh Supabase Realtime phản hồi ngay lập tức khi SePay Webhook cập nhật transactions
+    // Kênh Supabase Realtime phản hồi ngay lập tức khi SePay Webhook cập nhật transactions hoặc tickets
     const channel = supabase
-      .channel(`tx_${code}`)
+      .channel(`checkout_realtime_${checkoutTicket.id}_${code}`)
       .on(
         "postgres_changes",
         {
@@ -118,6 +143,25 @@ export default function CheckoutModal() {
         },
         (payload: any) => {
           if (payload?.new?.status === "paid" || payload?.new?.status === "completed") {
+            clearInterval(pollTimer);
+            completePurchase();
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "tickets",
+          filter: `id=eq.${checkoutTicket.id}`,
+        },
+        (payload: any) => {
+          const nextStatus = payload?.new?.status;
+          if (isDepositTx && nextStatus === "available") {
+            clearInterval(pollTimer);
+            completePurchase();
+          } else if (!isDepositTx && nextStatus === "sold") {
             clearInterval(pollTimer);
             completePurchase();
           }
