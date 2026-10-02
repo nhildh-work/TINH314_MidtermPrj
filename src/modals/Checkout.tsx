@@ -46,14 +46,14 @@ export default function CheckoutModal() {
             reference_code: code,
           });
 
-          // Tạm khóa vé để giữ chỗ
+          // Tạm khóa vé trong lúc chờ chuyển khoản
           await supabase
             .from("tickets")
             .update({ status: "locked" })
             .eq("id", checkoutTicket.id);
         }
       } catch (err) {
-        console.warn("Notice during transaction initialization:", err);
+        console.warn("Lỗi khởi tạo giao dịch:", err);
       } finally {
         setQrReady(true);
       }
@@ -65,7 +65,7 @@ export default function CheckoutModal() {
   useEffect(() => {
     if (!qrReady || paymentStatus === "paid" || !refCode) return;
 
-    // Lắng nghe Realtime Webhook từ SePay/Supabase
+    // Lắng nghe SePay Webhook cập nhật trạng thái giao dịch
     const channel = supabase
       .channel(`tx-${refCode}`)
       .on(
@@ -85,7 +85,6 @@ export default function CheckoutModal() {
       )
       .subscribe();
 
-    // Polling dự phòng mỗi 3 giây
     const interval = setInterval(async () => {
       try {
         const { data } = await supabase
@@ -118,10 +117,11 @@ export default function CheckoutModal() {
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${total}&addInfo=${refCode}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  // HÀM XÁC NHẬN MUA THÀNH CÔNG: ĐỔI TRẠNG THÁI VÉ SANG 'sold' ĐỂ ẨN KHỎI CHỢ
+  // HÀM HOÀN TẤT MUA VÉ: ĐẨY TRẠNG THÁI 'sold' LÊN SUPABASE VÀ ĐƯA VÉ VÀO 'VÉ CỦA TÔI' VỚI TRẠNG THÁI 'paid'
   const completePurchase = async () => {
     setPaymentStatus("paid");
 
+    // 1. Đổi vé sang 'sold' trên Supabase ngay lập tức để ẩn khỏi Trang chủ Marketplace
     if (checkoutTicket && checkoutTicket.id) {
       try {
         await supabase
@@ -129,21 +129,24 @@ export default function CheckoutModal() {
           .update({ status: "sold" })
           .eq("id", checkoutTicket.id);
       } catch (err) {
-        console.error("Lỗi cập nhật trạng thái vé sang sold:", err);
+        console.error("Lỗi cập nhật vé sang sold:", err);
       }
     }
 
     addToCart();
+
+    // 2. Đưa vé vào danh sách vé đã mua với trạng thái 'paid' (SẴN SÀNG QUÉT CỔNG, KHÔNG PHẢI ĐÃ VÀO CỔNG)
     addPurchasedTicket({
-      id: Date.now(),
+      id: checkoutTicket.id || Date.now(),
       eventTitle: checkoutTicket.eventTitle,
       eventImage: checkoutTicket.eventImage,
       tier: checkoutTicket.tier,
-      date: "Sắp diễn ra",
+      date: checkoutTicket.eventDate || "Sắp diễn ra",
       venue: checkoutTicket.venue || checkoutTicket.city || "TP.HCM",
       price: total,
-      status: "locked",
+      status: "paid", 
     });
+
     setDone(true);
   };
 
@@ -181,7 +184,7 @@ export default function CheckoutModal() {
               <div className="text-5xl mb-4">✅</div>
               <h3 className="font-display font-800 text-white text-xl mb-2">Thanh toán thành công!</h3>
               <p className="text-sm mb-6" style={{ color: "#9ca3af" }}>
-                Hệ thống đã nhận diện biến động số dư. Vé của bạn đang được SafePass giữ an toàn trong Escrow.
+                Hệ thống đã nhận diện biến động số dư. Vé của bạn đã sẵn sàng sử dụng trong mục "Vé Của Tôi".
               </p>
               <div className="flex justify-center gap-3">
                 <button
@@ -299,7 +302,6 @@ export default function CheckoutModal() {
                     </div>
                   </div>
 
-                  {/* Auto-verification status indicator */}
                   <div className="flex items-center justify-center gap-2 mt-3.5 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 w-full">
                     <div className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
                     <p className="text-[11px] font-600 text-amber-300 leading-snug text-center">
@@ -330,16 +332,6 @@ export default function CheckoutModal() {
                     </div>
                   </div>
 
-                  {checkoutTicket.minimapUrl && (
-                    <div className="mb-3 rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
-                      <div className="px-3 py-2 flex items-center gap-1.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", background: "rgba(96,165,250,0.06)" }}>
-                        <span className="text-xs">🗺️</span>
-                        <p className="text-xs font-display font-700" style={{ color: "#93C5FD" }}>Sơ đồ khu vực ghế</p>
-                      </div>
-                      <img src={checkoutTicket.minimapUrl} alt="Sơ đồ" className="w-full object-contain" style={{ maxHeight: "140px", background: "#0a0a14" }} />
-                    </div>
-                  )}
-
                   <div className="space-y-2 mb-4 bg-white/[0.02] p-3 rounded-xl border border-white/5">
                     <div className="flex justify-between text-xs" style={{ color: "#9ca3af" }}>
                       <span>Giá vé</span><span>{fmt(checkoutTicket.price)}</span>
@@ -352,7 +344,6 @@ export default function CheckoutModal() {
                     </div>
                   </div>
 
-                  {/* Terms Policy checkbox */}
                   <div className="flex items-start gap-2.5 my-3">
                     <input
                       type="checkbox"
@@ -387,7 +378,6 @@ export default function CheckoutModal() {
         </div>
       </div>
 
-      {/* Policy Modal */}
       <PolicyModal isOpen={showTerms} onClose={() => setShowTerms(false)} />
     </>
   );
