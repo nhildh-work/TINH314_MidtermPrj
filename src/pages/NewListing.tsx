@@ -7,7 +7,7 @@ const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 function generateDepositCode() {
   const digits = Math.floor(100000 + Math.random() * 900000);
-  return `SP${digits}`;
+  return `SAFEPASS KYQUY ${digits}`;
 }
 
 export default function NewListing() {
@@ -50,10 +50,9 @@ export default function NewListing() {
   const step2Valid = numPrice > 0 && ticketFile !== null;
 
   const depositQrUrl = depositRefCode && depositAmount > 0
-    ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${depositAmount}&addInfo=${depositRefCode}&accountName=NGUYEN DINH NGUYEN`
+    ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${depositAmount}&addInfo=${encodeURIComponent(depositRefCode)}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  // Handle final deposit confirmation and publish ticket
   const handleConfirmDepositAndPublish = async () => {
     if (!currentUser) {
       setAuthModal("login");
@@ -64,7 +63,6 @@ export default function NewListing() {
       setLoading(true);
       setErrorMsg(null);
 
-      // 1. Insert ticket to Supabase
       const { data, error } = await supabase
         .from("tickets")
         .insert({
@@ -87,7 +85,6 @@ export default function NewListing() {
         console.error("Supabase insert ticket error:", error);
       }
 
-      // 2. Record deposit transaction in Supabase
       if (data?.id) {
         try {
           await supabase.from("transactions").insert({
@@ -102,7 +99,6 @@ export default function NewListing() {
         }
       }
 
-      // 3. Update dynamic local & broadcast listings
       const newListing = {
         id: data ? Number(data.id) : Date.now(),
         eventId: 0,
@@ -144,7 +140,6 @@ export default function NewListing() {
           <h1 className="font-display font-800 text-white text-xl">Đăng Bán Vé & Ký Quỹ Bảo Chứng</h1>
         </div>
 
-        {/* Steps Breadcrumb */}
         <div className="flex gap-0 mb-7 overflow-x-auto pb-1">
           {STEPS.map((label, i) => {
             const n = i + 1;
@@ -177,7 +172,7 @@ export default function NewListing() {
             <div className="text-5xl mb-4">🎉</div>
             <h2 className="font-display font-800 text-white text-2xl mb-2">Đăng Vé & Ký Quỹ Thành Công!</h2>
             <p className="text-sm mb-4 max-w-md mx-auto text-gray-300 leading-relaxed">
-              Vé sự kiện <strong className="text-purple-300">"{eventName}"</strong> đã được đưa lên hệ thống Chợ Vé SafePass và hiển thị công khai cho mọi người mua.
+              Vé sự kiện <strong className="text-purple-300">"{eventName}"</strong> đã được đưa lên hệ thống Chợ Vé SafePass và hiển thị công khai.
             </p>
             <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 max-w-md mx-auto text-xs text-purple-200 mb-6 space-y-1 text-left">
               <p>• <strong>Số tiền cọc 25%:</strong> {fmt(depositAmount)} (đang được giữ trong quỹ Escrow).</p>
@@ -200,7 +195,6 @@ export default function NewListing() {
           </div>
         ) : (
           <div className="sp-card p-6">
-            {/* STEP 1: EVENT INFO */}
             {step === 1 && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-white/5">
@@ -250,7 +244,7 @@ export default function NewListing() {
                       value={venue}
                       onChange={e => setVenue(e.target.value)}
                       className="sp-input"
-                      placeholder="Ví dụ: SVĐ Quốc Gia Mỹ Đình / SVĐ Quân Khu 7"
+                      placeholder="Ví dụ: SVĐ Quốc Gia Mỹ Đình"
                     />
                   </div>
                   <div>
@@ -274,7 +268,6 @@ export default function NewListing() {
               </div>
             )}
 
-            {/* STEP 2: PRICE & TICKET FILE */}
             {step === 2 && (
               <div className="space-y-5">
                 <div className="flex items-center justify-between pb-3 border-b border-white/5">
@@ -303,7 +296,6 @@ export default function NewListing() {
                   />
                 </div>
 
-                {/* 25% Deposit & 95% Payout breakdown */}
                 {numPrice > 0 && (
                   <div className="p-4 rounded-xl bg-[#0a0a18] border border-white/10 space-y-2 text-xs">
                     <div className="flex justify-between items-center text-gray-300">
@@ -311,17 +303,16 @@ export default function NewListing() {
                       <span className="font-display font-800 text-amber-400 text-sm">{fmt(depositAmount)}</span>
                     </div>
                     <div className="flex justify-between items-center text-gray-400">
-                      <span>Phí nền tảng SafePass (5% giá vé khi bán):</span>
+                      <span>Phí nền tảng SafePass (5%):</span>
                       <span className="font-semibold text-gray-300">-{fmt(Math.round(numPrice * 0.05))}</span>
                     </div>
                     <div className="flex justify-between items-center pt-2 border-t border-white/10 text-white">
-                      <span className="font-bold text-emerald-400">Tổng tiền bạn nhận về khi bán xong (Cọc + 95% vé):</span>
+                      <span className="font-bold text-emerald-400">Tổng tiền nhận về khi bán xong:</span>
                       <span className="font-display font-800 text-emerald-400 text-sm">{fmt(payoutOnSale)}</span>
                     </div>
                   </div>
                 )}
 
-                {/* Upload Section */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="sp-filter-label mb-2 block">Tải lên tệp vé gốc (PDF / Ảnh) *</label>
@@ -405,7 +396,6 @@ export default function NewListing() {
               </div>
             )}
 
-            {/* STEP 3: 25% ESCROW DEPOSIT TRANSFER */}
             {step === 3 && (
               <div className="space-y-5">
                 <div className="flex items-center justify-between pb-3 border-b border-white/5">
@@ -419,10 +409,9 @@ export default function NewListing() {
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 leading-relaxed">
-                  🛡️ <strong>Cơ chế bảo vệ ký quỹ:</strong> Người bán chuyển khoản cọc 25% giá trị vé để hệ thống bảo chứng và niêm yết lên sàn. Khoản cọc này được SafePass giữ an toàn trong Escrow và sẽ được <strong>hoàn trả 100%</strong> cùng với 95% tiền bán vé ngay khi giao dịch hoàn tất.
+                  🛡️ <strong>Cơ chế bảo vệ ký quỹ:</strong> Người bán chuyển khoản cọc 25% giá trị vé để hệ thống bảo chứng. Nội dung bắt đầu bằng <strong className="text-amber-300">SAFEPASS KYQUY</strong> để tự động hóa đối soát với SePay Webhook.
                 </div>
 
-                {/* QR Code & Banking Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center p-4 rounded-2xl bg-[#080816] border border-white/8">
                   <div className="flex flex-col items-center justify-center">
                     <div className="bg-white p-2.5 rounded-2xl shadow-xl mb-2">
@@ -518,7 +507,6 @@ export default function NewListing() {
                   </div>
                 )}
 
-                {/* Terms agreement */}
                 <div className="flex items-start gap-2.5 my-2">
                   <input
                     type="checkbox"
@@ -536,7 +524,7 @@ export default function NewListing() {
                     >
                       Điều khoản & Chính sách giao dịch
                     </button>
-                    {" "}của nền tảng. Tôi hiểu rằng tiền cọc 25% sẽ được hoàn trả 100% cùng 95% tiền vé khi bán thành công.
+                    {" "}của nền tảng. Tôi hiểu rằng tiền cọc 25% sẽ được hoàn trả 100% khi bán thành công.
                   </label>
                 </div>
 
