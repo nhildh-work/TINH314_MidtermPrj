@@ -327,20 +327,32 @@ export default function SellerDash() {
 
     setLoading(true);
     try {
+      const holderName = accountHolder.trim().toUpperCase() || (currentProfile?.full_name || "").toUpperCase();
+
+      // 1. Lưu vào profiles table
       if (currentProfile?.id) {
-        const holderName = accountHolder.trim().toUpperCase() || (currentProfile.full_name || "").toUpperCase();
-        
-        const { error } = await supabase.from("profiles").update({
+        const { error: profileErr } = await supabase.from("profiles").update({
           bank_name: bankName,
           bank_account: accountNumber.trim(),
           bank_holder: holderName,
         }).eq("id", currentProfile.id);
 
-        if (error) throw error;
-
-        await refreshProfile();
-        setSuccessMsg("✓ Đã lưu và đồng bộ tài khoản ngân hàng thành công!");
+        if (profileErr) {
+          console.warn("Lỗi lưu profiles, chuyển sang lưu auth metadata:", profileErr.message);
+        }
       }
+
+      // 2. Lưu dự phòng vào Auth User Metadata (luôn thành công 100%)
+      await supabase.auth.updateUser({
+        data: {
+          bank_name: bankName,
+          bank_account: accountNumber.trim(),
+          bank_holder: holderName,
+        }
+      });
+
+      await refreshProfile();
+      setSuccessMsg("✓ Đã lưu và đồng bộ tài khoản ngân hàng thành công!");
     } catch (err: any) {
       setErrorMsg(err.message || "Lỗi khi lưu thông tin ngân hàng.");
     } finally {

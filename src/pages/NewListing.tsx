@@ -1,605 +1,365 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useApp } from "../context";
 import { supabase } from "../lib/supabaseClient";
-import { PolicyModal } from "../components/PolicyModal";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
-function generateDepositCode() {
-  const digits = Math.floor(100000 + Math.random() * 900000);
-  return `SAFEPASS KYQUY ${digits}`;
-}
-
 export default function NewListing() {
-  const { nav, dynamicMarketListings, setDynamicMarketListings, setRole, currentUser, currentProfile, setAuthModal, t } = useApp();
-  
-  const [agreedTerms, setAgreedTerms] = useState(true);
-  const [showTerms, setShowTerms] = useState(false);
-  
-  const [step, setStep] = useState(1);
+  const { nav, currentUser } = useApp();
 
-  // Form Fields
   const [eventName, setEventName] = useState("");
-  const [tier, setTier] = useState("");
-  const [city, setCity] = useState("TP.HCM");
-  const [venue, setVenue] = useState("");
   const [eventDate, setEventDate] = useState("");
-  const [price, setPrice] = useState("");
-  const [quantity, setQuantity] = useState("1");
-
-  const [ticketFile, setTicketFile] = useState<File | null>(null);
-  const [mapFile, setMapFile] = useState<File | null>(null);
+  const [venue, setVenue] = useState("");
+  const [city, setCity] = useState("TP.HCM");
+  const [tier, setTier] = useState("Standard");
+  const [pricePerTicket, setPricePerTicket] = useState<number>(500000);
+  const [quantity, setQuantity] = useState<number>(1);
+  const [qrFiles, setQrFiles] = useState<File[]>([]);
+  const [notes, setNotes] = useState("");
+  
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [createdCount, setCreatedCount] = useState(0);
 
-  const [depositRefCode, setDepositRefCode] = useState<string>("");
-  const [copiedDepositCode, setCopiedDepositCode] = useState(false);
-  const [copiedAcc, setCopiedAcc] = useState(false);
-  const [copiedAmount, setCopiedAmount] = useState(false);
+  // Xử lý chọn nhiều file QR vé cùng lúc
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const filesArray = Array.from(e.target.files);
+      setQrFiles(filesArray);
+      if (filesArray.length > 0) {
+        setQuantity(filesArray.length);
+      }
+    }
+  };
 
-  useEffect(() => {
-    setDepositRefCode(generateDepositCode());
-  }, []);
+  // Xóa 1 file QR lẻ khỏi danh sách đã chọn
+  const removeQrFile = (index: number) => {
+    const updated = qrFiles.filter((_, i) => i !== index);
+    setQrFiles(updated);
+    setQuantity(updated.length > 0 ? updated.length : 1);
+  };
 
-  const numPrice = Number(price) || 0;
-  const numQty = Math.max(1, parseInt(quantity) || 1);
-  const singleDeposit = Math.round(numPrice * 0.25);
-  const totalDepositAmount = singleDeposit * numQty;
-  const payoutOnSale = (singleDeposit + Math.round(numPrice * 0.95)) * numQty;
+  const depositPerTicket = Math.round(pricePerTicket * 0.25);
+  const totalDeposit = depositPerTicket * qrFiles.length;
+  const platformFeePerTicket = Math.round(pricePerTicket * 0.05);
 
-  const step1Valid = eventName.trim() && tier.trim() && city.trim() && eventDate.trim();
-  const step2Valid = numPrice > 0 && numQty > 0 && ticketFile !== null;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
 
-  const depositQrUrl = depositRefCode && totalDepositAmount > 0
-    ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${totalDepositAmount}&addInfo=${encodeURIComponent(depositRefCode)}&accountName=NGUYEN DINH NGUYEN`
-    : "";
+    if (!eventName.trim() || !eventDate.trim() || !venue.trim()) {
+      setErrorMsg("Vui lòng điền đầy đủ thông tin sự kiện và địa điểm!");
+      return;
+    }
 
-  const handleProceedToStep3 = async () => {
+    if (pricePerTicket < 10000) {
+      setErrorMsg("Giá bán tối thiểu cho mỗi vé là 10.000 VND!");
+      return;
+    }
+
+    if (qrFiles.length === 0) {
+      setErrorMsg("Vui lòng tải lên ít nhất 1 file ảnh mã QR vé!");
+      return;
+    }
+
     if (!currentUser) {
-      setAuthModal("login");
+      setErrorMsg("Bạn chưa đăng nhập. Vui lòng đăng nhập để tiếp tục!");
       return;
     }
 
-    if (!agreedTerms) {
-      setErrorMsg("Vui lòng đồng ý với Điều khoản & Chính sách giao dịch.");
-      return;
-    }
+    setLoading(true);
 
     try {
-      setLoading(true);
-      setErrorMsg(null);
+      // TỰ ĐỘNG TÁCH THÀNH N BẢN GHI TICKETS RIÊNG BIỆT DƯỚI DATABASE
+      const ticketsToInsert = qrFiles.map((file, idx) => ({
+        seller_id: currentUser.id,
+        event_name: eventName.trim(),
+        event_date: eventDate,
+        venue: `${venue.trim()} (${city})`,
+        city: city,
+        tier: qrFiles.length > 1 ? `${tier} - Vé #${idx + 1}` : tier,
+        price: Number(pricePerTicket),
+        qr_code_url: file.name,
+        status: "available",
+        notes: notes.trim() || null,
+        created_at: new Date().toISOString(),
+      }));
 
-      const ticketsToInsert = [];
-      for (let i = 0; i < numQty; i++) {
-        ticketsToInsert.push({
-          seller_id: currentUser.id,
-          event_name: eventName.trim(),
-          price: numPrice,
-          status: "pending_deposit",
-          tier: tier.trim(),
-          city: city.trim(),
-          venue: venue.trim() || city.trim(),
-          event_date: eventDate.trim(),
-          event_image: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
-          section: tier.trim(),
-          seat: numQty > 1 ? `Ghế tự do #${i + 1}` : "—",
-        });
-      }
-
-      const { data: insertedTickets, error: ticketError } = await supabase
+      const { data, error } = await supabase
         .from("tickets")
         .insert(ticketsToInsert)
         .select();
 
-      if (ticketError) throw ticketError;
+      if (error) throw error;
 
-      if (insertedTickets && insertedTickets.length > 0) {
-        await supabase.from("transactions").insert({
-          ticket_id: insertedTickets[0].id,
-          buyer_id: currentUser.id,
-          amount: totalDepositAmount,
-          status: "pending",
-          reference_code: depositRefCode,
-        });
-
-        const channel = supabase
-          .channel(`deposit_listener_${insertedTickets[0].id}`)
-          .on(
-            'postgres_changes',
-            {
-              event: 'UPDATE',
-              schema: 'public',
-              table: 'transactions',
-              filter: `reference_code=eq.${depositRefCode}`,
-            },
-            async (payload: any) => {
-              const st = payload.new.status;
-              if (st === 'paid' || st === 'completed') {
-                const insertedIds = insertedTickets.map((t: any) => t.id);
-                await supabase.from('tickets').update({ status: 'available' }).in('id', insertedIds);
-
-                const newListings = insertedTickets.map((tItem: any) => ({
-                  id: Number(tItem.id),
-                  eventId: 0,
-                  eventTitle: eventName.trim(),
-                  eventImage: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
-                  eventDate: eventDate.trim(),
-                  city: city.trim(),
-                  tier: tier.trim(),
-                  tierColor: "#A78BFA",
-                  section: tier.trim(),
-                  seat: tItem.seat,
-                  price: numPrice,
-                  officialPrice: numPrice,
-                  sellerName: currentProfile?.full_name || currentUser.email?.split("@")[0] || "Người bán chính chủ",
-                  sellerScore: 5.0,
-                  sellerReviews: 1,
-                  verified: true,
-                  minimapUrl: mapFile ? URL.createObjectURL(mapFile) : undefined,
-                }));
-
-                setDynamicMarketListings([...newListings, ...dynamicMarketListings]);
-                setDone(true);
-                supabase.removeChannel(channel);
-              }
-            }
-          )
-          .subscribe();
-      }
-
-      setStep(3);
+      setCreatedCount(data ? data.length : qrFiles.length);
+      setSuccess(true);
     } catch (err: any) {
-      setErrorMsg(err.message || "Không thể khởi tạo phiên ký quỹ. Vui lòng thử lại.");
+      console.error("Lỗi khi tạo niêm yết vé:", err);
+      setErrorMsg(err.message || "Không thể đăng bán vé. Vui lòng kiểm tra lại kết nối Database!");
     } finally {
       setLoading(false);
     }
   };
 
-  const STEPS = ["1. Thông tin sự kiện", "2. Giá & Tệp vé", "3. Ký quỹ 25% tự động"];
+  if (success) {
+    return (
+      <div className="max-w-xl mx-auto px-5 py-20 text-center space-y-6">
+        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center mx-auto text-4xl animate-bounce">
+          🎉
+        </div>
+        <div>
+          <h2 className="font-display font-800 text-white text-2xl">Đăng Bán Thành Công!</h2>
+          <p className="text-sm text-gray-300 mt-2 leading-relaxed">
+            Hệ thống SafePass đã tự động tách thành <strong className="text-purple-400">{createdCount} vé độc lập</strong>. Mỗi vé chứa 1 mã QR riêng biệt để người mua có thể chọn mua lẻ.
+          </p>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 text-xs text-left space-y-2 max-w-md mx-auto">
+          <div className="flex justify-between">
+            <span className="text-gray-400">Sự kiện:</span>
+            <span className="font-bold text-white">{eventName}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Số lượng vé đã tách:</span>
+            <span className="font-bold text-emerald-400">{createdCount} vé</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Đơn giá niêm yết:</span>
+            <span className="font-bold text-purple-300">{fmt(pricePerTicket)} / vé</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Tiền cọc ký quỹ Escrow:</span>
+            <span className="font-bold text-amber-300">{fmt(depositPerTicket * createdCount)} (25%)</span>
+          </div>
+        </div>
+
+        <div className="flex justify-center gap-3 pt-2">
+          <button
+            onClick={() => {
+              setSuccess(false);
+              setQrFiles([]);
+              setEventName("");
+            }}
+            className="sp-btn-ghost px-6 py-3 font-display font-700 text-xs cursor-pointer"
+          >
+            + Đăng bán thêm vé khác
+          </button>
+          <button
+            onClick={() => nav("seller-dash")}
+            className="sp-btn-primary px-8 py-3 font-display font-700 text-xs cursor-pointer shadow-lg"
+          >
+            Quản lý kho vé của tôi →
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <div className="max-w-3xl mx-auto px-5 lg:px-8 py-8">
-        <div className="flex items-center gap-3 mb-6">
+    <div className="max-w-3xl mx-auto px-5 py-8 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
           <button onClick={() => nav("seller-dash")} className="sp-btn-ghost text-xs px-3 py-1.5 cursor-pointer">
-            ← Quay lại Bảng điều khiển
+            ← Quay lại
           </button>
-          <h1 className="font-display font-800 text-white text-xl">Đăng Bán Vé & Ký Quỹ Tự Động</h1>
-        </div>
-
-        <div className="flex gap-0 mb-7 overflow-x-auto pb-1">
-          {STEPS.map((label, i) => {
-            const n = i + 1;
-            const done_step = step > n;
-            const active = step === n;
-            return (
-              <div key={n} className="flex items-center gap-0 min-w-0">
-                <div className="flex items-center gap-2 shrink-0">
-                  <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-display font-700 shrink-0 transition-all"
-                    style={{
-                      background: done_step ? "#A3E635" : active ? "linear-gradient(135deg,#7C3AED,#A855F7)" : "#1e1e30",
-                      color: done_step ? "#000" : "#fff",
-                    }}
-                  >
-                    {done_step ? "✓" : n}
-                  </div>
-                  <span className="text-xs font-display font-600 hidden sm:block" style={{ color: active ? "#c4b5fd" : done_step ? "#A3E635" : "#64748b" }}>
-                    {label}
-                  </span>
-                </div>
-                {i < 2 && <div className="w-8 sm:w-12 h-0.5 mx-2 shrink-0" style={{ background: done_step ? "#7C3AED" : "#1e1e30" }} />}
-              </div>
-            );
-          })}
-        </div>
-
-        {done ? (
-          <div className="sp-card p-10 text-center">
-            <div className="text-5xl mb-4">🎉</div>
-            <h2 className="font-display font-800 text-white text-2xl mb-2">Nhận Diện Ký Quỹ Thành Công!</h2>
-            <p className="text-sm mb-4 max-w-md mx-auto text-gray-300 leading-relaxed">
-              Hệ thống SePay đã tự động xác thực khoản cọc <strong className="text-amber-400">{fmt(totalDepositAmount)}</strong> ({numQty} vé). Vé sự kiện <strong className="text-purple-300">"{eventName}"</strong> đã được tự động phát hành lên sàn Chợ Vé SafePass.
-            </p>
-            <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 max-w-md mx-auto text-xs text-purple-200 mb-6 space-y-1 text-left">
-              <p>• <strong>Số lượng vé:</strong> {numQty} vé mở bán công khai.</p>
-              <p>• <strong>Khi bán thành công:</strong> Nhận ngay <strong className="text-emerald-400">{fmt(payoutOnSale)}</strong> (100% cọc + 95% tiền vé).</p>
-            </div>
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={() => { setRole("buyer"); nav("marketplace"); }}
-                className="sp-btn-primary px-6 py-2.5 font-display font-700 cursor-pointer"
-              >
-                Xem trên Chợ Vé
-              </button>
-              <button
-                onClick={() => nav("seller-dash")}
-                className="sp-btn-ghost px-6 py-2.5 font-display font-700 cursor-pointer"
-              >
-                Quản lý vé của tôi
-              </button>
-            </div>
+          <div>
+            <h1 className="font-display font-800 text-white text-2xl">Đăng Bán Vé Mới</h1>
+            <p className="text-xs text-gray-400 mt-0.5">Tải lên nhiều mã QR cùng lúc để hệ thống tự động tách từng vé độc lập</p>
           </div>
-        ) : (
-          <div className="sp-card p-6">
-            {step === 1 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                  <h2 className="font-display font-700 text-white text-base">Bước 1: Thông tin vé sự kiện</h2>
-                  <span className="text-xs text-purple-400 font-600">Trực quan & Chính xác</span>
-                </div>
-
-                <div>
-                  <label className="sp-filter-label mb-1.5 block">Tên sự kiện *</label>
-                  <input
-                    value={eventName}
-                    onChange={e => setEventName(e.target.value)}
-                    className="sp-input"
-                    placeholder="Ví dụ: Concert Anh Trai Vượt Ngàn Chông Gai 2026"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="sp-filter-label mb-1.5 block">Hạng vé (Tier) *</label>
-                    <input
-                      value={tier}
-                      onChange={e => setTier(e.target.value)}
-                      className="sp-input"
-                      placeholder="Ví dụ: VIP 1, GA Đứng..."
-                    />
-                  </div>
-                  <div>
-                    <label className="sp-filter-label mb-1.5 block">Khu vực / Thành phố *</label>
-                    <select
-                      value={city}
-                      onChange={e => setCity(e.target.value)}
-                      className="sp-select"
-                    >
-                      <option value="TP.HCM">TP. Hồ Chí Minh</option>
-                      <option value="Hà Nội">Hà Nội</option>
-                      <option value="Đà Nẵng">Đà Nẵng</option>
-                      <option value="Khác">Khu vực khác</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="sp-filter-label mb-1.5 block">Địa điểm cụ thể *</label>
-                    <input
-                      value={venue}
-                      onChange={e => setVenue(e.target.value)}
-                      className="sp-input"
-                      placeholder="Ví dụ: SVĐ Quốc Gia Mỹ Đình"
-                    />
-                  </div>
-                  <div>
-                    <label className="sp-filter-label mb-1.5 block">Thời gian diễn ra *</label>
-                    <input
-                      value={eventDate}
-                      onChange={e => setEventDate(e.target.value)}
-                      className="sp-input"
-                      placeholder="Ví dụ: 19:30 - 28/11/2026"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setStep(2)}
-                  disabled={!step1Valid}
-                  className="w-full sp-btn-primary py-3.5 font-display font-700 mt-4 cursor-pointer disabled:opacity-40"
-                >
-                  Tiếp tục: Nhập giá & Tải vé →
-                </button>
-              </div>
-            )}
-
-            {step === 2 && (
-              <div className="space-y-5">
-                <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                  <h2 className="font-display font-700 text-white text-base">Bước 2: Giá niêm yết & Tệp vé</h2>
-                  <span className="text-xs text-purple-400 font-600">Quy chế Ký quỹ 25%</span>
-                </div>
-
-                <div className="flex items-center gap-3 p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-purple-500/20">
-                    🎟️
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-700 text-white truncate">{eventName}</p>
-                    <p className="text-xs text-purple-300 font-semibold">{tier} · {city} · {eventDate}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="sp-filter-label mb-1.5 block">Giá bán 1 vé (VND) *</label>
-                    <input
-                      type="number"
-                      value={price}
-                      onChange={e => setPrice(e.target.value)}
-                      className="sp-input text-lg font-display font-700"
-                      placeholder="Nhập giá vé (VD: 1000000)"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="sp-filter-label mb-1.5 block">Số lượng vé muốn đăng bán *</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="20"
-                      value={quantity}
-                      onChange={e => setQuantity(e.target.value)}
-                      className="sp-input text-lg font-display font-700 text-purple-300"
-                      placeholder="Số lượng (VD: 1, 2, 5...)"
-                    />
-                  </div>
-                </div>
-
-                {numPrice > 0 && (
-                  <div className="p-4 rounded-xl bg-[#0a0a18] border border-white/10 space-y-2 text-xs">
-                    <div className="flex justify-between items-center text-gray-300">
-                      <span>Tiền cọc ký quỹ (25% x {numQty} vé):</span>
-                      <span className="font-display font-800 text-amber-400 text-sm">{fmt(totalDepositAmount)}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-gray-400">
-                      <span>Phí nền tảng SafePass (5%):</span>
-                      <span className="font-semibold text-gray-300">-{fmt(Math.round(numPrice * 0.05 * numQty))}</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-2 border-t border-white/10 text-white">
-                      <span className="font-bold text-emerald-400">Tổng tiền nhận về khi bán xong tất cả:</span>
-                      <span className="font-display font-800 text-emerald-400 text-sm">{fmt(payoutOnSale)}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="sp-filter-label mb-2 block">Tải lên tệp vé gốc (PDF / Ảnh) *</label>
-                    <label className="block cursor-pointer">
-                      <div
-                        className="h-36 rounded-xl flex flex-col items-center justify-center transition-all p-3 text-center"
-                        style={{
-                          border: ticketFile ? "2px solid rgba(163,230,53,0.5)" : "2px dashed rgba(139,92,246,0.3)",
-                          background: "#0a0a14",
-                        }}
-                      >
-                        {ticketFile ? (
-                          <>
-                            <p className="text-2xl mb-1">✅</p>
-                            <p className="text-xs font-display font-700 text-lime-400 line-clamp-2">{ticketFile.name}</p>
-                            <p className="text-[11px] mt-1 text-gray-400">Nhấn để đổi file khác</p>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-2xl mb-1.5">📎</span>
-                            <p className="text-xs font-700 text-white">Chọn tệp vé của bạn</p>
-                            <p className="text-[11px] text-gray-500 mt-0.5">Hỗ trợ PDF, PNG, JPG</p>
-                          </>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept=".pdf,.png,.jpg,.jpeg,.zip"
-                        className="hidden"
-                        onChange={e => e.target.files?.[0] && setTicketFile(e.target.files[0])}
-                      />
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="sp-filter-label mb-2 block">Sơ đồ vị trí ghế (Tùy chọn)</label>
-                    <label className="block cursor-pointer">
-                      <div
-                        className="h-36 rounded-xl flex flex-col items-center justify-center transition-all p-3 text-center"
-                        style={{
-                          border: mapFile ? "2px solid rgba(34,211,238,0.5)" : "2px dashed rgba(34,211,238,0.2)",
-                          background: "#0a0a14",
-                        }}
-                      >
-                        {mapFile ? (
-                          <>
-                            <p className="text-2xl mb-1">🗺️</p>
-                            <p className="text-xs font-display font-700 text-cyan-400 line-clamp-2">{mapFile.name}</p>
-                            <p className="text-[11px] mt-1 text-gray-400">Nhấn để đổi sơ đồ khác</p>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-2xl mb-1.5">🗺️</span>
-                            <p className="text-xs font-700 text-white">Chọn ảnh sơ đồ khu vực</p>
-                            <p className="text-[11px] text-gray-500 mt-0.5">Hỗ trợ PNG, JPG</p>
-                          </>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept=".png,.jpg,.jpeg"
-                        className="hidden"
-                        onChange={e => e.target.files?.[0] && setMapFile(e.target.files[0])}
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {errorMsg && (
-                  <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
-                    ⚠️️ {errorMsg}
-                  </div>
-                )}
-
-                <div className="flex items-start gap-2.5 my-2">
-                  <input
-                    type="checkbox"
-                    id="terms-check-seller"
-                    checked={agreedTerms}
-                    onChange={(e) => setAgreedTerms(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-[#13132a] text-purple-600 focus:ring-purple-500 cursor-pointer shrink-0"
-                  />
-                  <label htmlFor="terms-check-seller" className="text-xs text-gray-400 leading-relaxed cursor-pointer">
-                    Tôi đã đọc và đồng ý với{" "}
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); setShowTerms(true); }}
-                      className="text-purple-400 hover:text-purple-300 font-bold underline transition-colors"
-                    >
-                      Điều khoản & Chính sách giao dịch
-                    </button>
-                    {" "}của nền tảng.
-                  </label>
-                </div>
-
-                <div className="flex gap-3">
-                  <button onClick={() => setStep(1)} className="flex-1 sp-btn-ghost py-3.5 font-display font-700 cursor-pointer">
-                    ← Quay lại Bước 1
-                  </button>
-                  <button
-                    onClick={handleProceedToStep3}
-                    disabled={!step2Valid || !agreedTerms || loading}
-                    className="flex-1 sp-btn-primary py-3.5 font-display font-700 cursor-pointer disabled:opacity-40"
-                  >
-                    {loading ? "Đang tạo phiên ký quỹ..." : "Tạo mã QR cọc & Chờ thanh toán →"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {step === 3 && (
-              <div className="space-y-5 text-center">
-                <div className="flex items-center justify-between pb-3 border-b border-white/5 text-left">
-                  <div>
-                    <h2 className="font-display font-800 text-white text-base">Bước 3: Đang chờ thanh toán ký quỹ tự động</h2>
-                    <p className="text-xs text-amber-400 font-semibold mt-0.5">Hệ thống SePay đang lắng nghe giao dịch chuyển khoản</p>
-                  </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/25 font-bold">
-                    Cọc ({numQty} vé): {fmt(totalDepositAmount)}
-                  </span>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 text-left leading-relaxed">
-                  🔄 <strong>Đang chờ SePay Webhook tự động nhận diện:</strong> Vui lòng quét mã QR bên dưới bằng App Ngân hàng với đúng nội dung <strong className="text-amber-300">{depositRefCode}</strong>. Ngay khi tiền vào tài khoản, hệ thống sẽ tự động đưa {numQty} vé lên sàn cùng lúc!
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center p-4 rounded-2xl bg-[#080816] border border-white/8 text-left">
-                  <div className="flex flex-col items-center justify-center">
-                    <div className="bg-white p-2.5 rounded-2xl shadow-xl mb-2 relative">
-                      {depositQrUrl ? (
-                        <>
-                          <img
-                            src={depositQrUrl}
-                            alt="QR Ký Quỹ SafePass"
-                            className="rounded-xl"
-                            style={{ width: 190, height: 190 }}
-                          />
-                          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] rounded-xl flex flex-col items-center justify-center text-white text-xs font-bold animate-pulse">
-                            <span>⏳ Đang chờ thanh toán...</span>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="w-[190px] h-[190px] flex items-center justify-center text-xs text-gray-500">
-                          Đang tạo mã VietQR cọc...
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
-                      <span>📱</span>
-                      <span>Hệ thống tự động nhận diện sau khi chuyển khoản</span>
-                    </p>
-                  </div>
-
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between items-center py-1 border-b border-white/5">
-                      <span className="text-gray-400">Ngân hàng:</span>
-                      <span className="font-bold text-white">MB Bank (Quân Đội)</span>
-                    </div>
-
-                    <div className="flex justify-between items-center py-1 border-b border-white/5">
-                      <span className="text-gray-400">Số tài khoản:</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-bold text-white">04111724267899</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText("04111724267899");
-                            setCopiedAcc(true);
-                            setTimeout(() => setCopiedAcc(false), 2000);
-                          }}
-                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] font-bold text-gray-300 hover:text-white"
-                        >
-                          {copiedAcc ? "✓" : "Copy"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center py-1 border-b border-white/5">
-                      <span className="text-gray-400">Chủ tài khoản:</span>
-                      <span className="font-bold text-white uppercase">NGUYEN DINH NGUYEN</span>
-                    </div>
-
-                    <div className="flex justify-between items-center py-1 border-b border-white/5">
-                      <span className="text-gray-400">Tổng tiền cọc ({numQty} vé):</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-display font-800 text-amber-400 text-sm">{fmt(totalDepositAmount)}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(String(totalDepositAmount));
-                            setCopiedAmount(true);
-                            setTimeout(() => setCopiedAmount(false), 2000);
-                          }}
-                          className="px-2 py-0.5 rounded bg-white/10 text-[10px] font-bold text-gray-300 hover:text-white"
-                        >
-                          {copiedAmount ? "✓" : "Copy"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center pt-1">
-                      <span className="text-purple-300 font-bold">Nội dung CK:</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-800 text-purple-300 tracking-wider">{depositRefCode}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(depositRefCode);
-                            setCopiedDepositCode(true);
-                            setTimeout(() => setCopiedDepositCode(false), 2000);
-                          }}
-                          className="px-2 py-0.5 rounded bg-purple-500/25 text-[10px] font-bold text-purple-300 hover:text-white"
-                        >
-                          {copiedDepositCode ? "✓" : "Copy"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex justify-start">
-                  <button 
-                    onClick={async () => {
-                      if (depositRefCode) {
-                        try {
-                          await supabase.from("transactions").delete().eq("reference_code", depositRefCode);
-                        } catch (e) {
-                          console.warn("Lỗi dọn dẹp cọc pending:", e);
-                        }
-                      }
-                      setStep(2);
-                    }} 
-                    className="sp-btn-ghost py-2.5 px-4 text-xs font-display font-700 cursor-pointer"
-                  >
-                    ← Quay lại sửa thông tin
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        </div>
       </div>
 
-      <PolicyModal isOpen={showTerms} onClose={() => setShowTerms(false)} />
-    </>
+      <form onSubmit={handleSubmit} className="sp-card p-6 md:p-8 space-y-6">
+        {/* Tên sự kiện */}
+        <div>
+          <label className="sp-filter-label mb-2 block text-gray-200">1. Tên sự kiện / Concert / Show diễn *</label>
+          <input
+            type="text"
+            value={eventName}
+            onChange={e => setEventName(e.target.value)}
+            className="sp-input text-sm"
+            placeholder="VD: Anh Trai Vượt Ngàn Chông Gai 2026, BlackPink Born Pink..."
+            required
+          />
+        </div>
+
+        {/* Thời gian & Địa điểm */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="sp-filter-label mb-2 block text-gray-200">2. Thời gian diễn ra *</label>
+            <input
+              type="datetime-local"
+              value={eventDate}
+              onChange={e => setEventDate(e.target.value)}
+              className="sp-input text-sm"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="sp-filter-label mb-2 block text-gray-200">3. Thành phố *</label>
+            <select value={city} onChange={e => setCity(e.target.value)} className="sp-select text-sm">
+              <option value="TP.HCM">TP. Hồ Chí Minh</option>
+              <option value="Hà Nội">Hà Nội</option>
+              <option value="Đà Nẵng">Đà Nẵng</option>
+              <option value="Cần Thơ">Cần Thơ</option>
+              <option value="Khác">Khác</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="sp-filter-label mb-2 block text-gray-200">4. Địa điểm cụ thể *</label>
+          <input
+            type="text"
+            value={venue}
+            onChange={e => setVenue(e.target.value)}
+            className="sp-input text-sm"
+            placeholder="VD: Sân vận động Quốc gia Mỹ Đình, Vinhomes Grand Park..."
+            required
+          />
+        </div>
+
+        {/* Hạng vé & Đơn giá */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="sp-filter-label mb-2 block text-gray-200">5. Hạng vé / Sơ đồ khán đài</label>
+            <input
+              type="text"
+              value={tier}
+              onChange={e => setTier(e.target.value)}
+              className="sp-input text-sm"
+              placeholder="VD: VIP 1, CAT 2, SVIP Standing A..."
+            />
+          </div>
+
+          <div>
+            <label className="sp-filter-label mb-2 block text-gray-200">6. Đơn giá bán cho MỖI VÉ (VND) *</label>
+            <input
+              type="number"
+              value={pricePerTicket}
+              step={10000}
+              min={10000}
+              onChange={e => setPricePerTicket(Number(e.target.value))}
+              className="sp-input font-display font-800 text-emerald-400 text-base"
+              required
+            />
+          </div>
+        </div>
+
+        {/* Mục Tải Nhiều Mã QR Vé */}
+        <div className="p-5 rounded-2xl bg-purple-500/10 border border-purple-500/20 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <label className="font-display font-800 text-purple-300 text-sm block">
+                📲 7. Upload Mã QR Vé (Quét chọn nhiều file cùng lúc) *
+              </label>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Mỗi file ảnh tương ứng với 1 vé độc lập. Nhấn giữ Ctrl/Cmd hoặc kéo quét để chọn cả 5 file QR cùng lúc.
+              </p>
+            </div>
+            <span className="text-xs font-bold px-3 py-1 rounded-full bg-purple-500/20 text-purple-200 border border-purple-500/30 shrink-0">
+              {qrFiles.length} file QR đã chọn
+            </span>
+          </div>
+
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileChange}
+            className="sp-input text-xs cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-purple-600 file:text-white hover:file:bg-purple-500"
+          />
+
+          {/* Danh sách xem trước các file QR được tách */}
+          {qrFiles.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-purple-500/20">
+              <p className="text-xs font-bold text-gray-300">
+                Xem trước {qrFiles.length} vé độc lập sẽ được tạo tự động:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                {qrFiles.map((file, idx) => (
+                  <div
+                    key={idx}
+                    className="p-2.5 rounded-xl bg-black/60 border border-white/10 flex items-center justify-between text-xs"
+                  >
+                    <div className="truncate pr-2">
+                      <span className="font-bold text-purple-400 mr-1.5">Vé #{idx + 1}:</span>
+                      <span className="text-gray-300 truncate">{file.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono font-bold text-emerald-400">{fmt(pricePerTicket)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeQrFile(idx)}
+                        className="text-red-400 hover:text-red-300 font-bold px-1"
+                        title="Xóa vé này"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bảng tóm tắt phí & Tiền cọc Escrow */}
+        <div className="p-4 rounded-2xl bg-black/50 border border-white/10 space-y-2.5 text-xs">
+          <div className="flex justify-between items-center text-gray-300">
+            <span>Số lượng vé niêm yết:</span>
+            <span className="font-bold text-white text-sm">{qrFiles.length} vé</span>
+          </div>
+          <div className="flex justify-between items-center text-gray-300">
+            <span>Tổng giá trị niêm yết:</span>
+            <span className="font-bold text-white">{fmt(pricePerTicket * qrFiles.length)}</span>
+          </div>
+          <div className="flex justify-between items-center text-gray-300">
+            <span>Phí dịch vụ nền tảng SafePass (5%):</span>
+            <span className="font-bold text-purple-300">{fmt(platformFeePerTicket * qrFiles.length)}</span>
+          </div>
+          <div className="flex justify-between items-center text-gray-300 pt-2 border-t border-white/10">
+            <span className="font-bold text-amber-300 flex items-center gap-1">
+              <span>🛡️</span>
+              <span>Tiền cọc ký quỹ Escrow bảo vệ (25%/vé):</span>
+            </span>
+            <span className="font-display font-800 text-amber-400 text-sm">{fmt(totalDeposit)}</span>
+          </div>
+          <p className="text-[10px] text-gray-400 italic">
+            * Tiền cọc ký quỹ 25% sẽ được hoàn trả lại 100% cho người bán ngay khi sự kiện kết thúc trôi chảy không phát sinh khiếu nại vé giả/vé trùng.
+          </p>
+        </div>
+
+        {/* Ghi chú thêm */}
+        <div>
+          <label className="sp-filter-label mb-2 block text-gray-200">Ghi chú bổ sung (Không bắt buộc)</label>
+          <textarea
+            rows={2}
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            className="sp-input text-xs"
+            placeholder="VD: Nhận vé cứng trực tiếp tại cổng, vé chính chủ đổi tên được..."
+          />
+        </div>
+
+        {errorMsg && (
+          <div className="p-4 bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded-xl leading-relaxed">
+            ⚠️ {errorMsg}
+          </div>
+        )}
+
+        {/* Nút gửi */}
+        <button
+          type="submit"
+          disabled={loading || qrFiles.length === 0}
+          className="w-full sp-btn-primary py-4 font-display font-800 text-sm cursor-pointer disabled:opacity-40 shadow-xl"
+        >
+          {loading ? "Đang xử lý tách vé..." : `Xác Nhận Niêm Yết & Tách ${qrFiles.length > 0 ? qrFiles.length : ""} Vé Độc Lập →`}
+        </button>
+      </form>
+    </div>
   );
 }
