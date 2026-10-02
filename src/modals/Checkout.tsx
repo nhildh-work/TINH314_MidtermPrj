@@ -7,7 +7,7 @@ const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 function generateRefCode(ticketId: string | number) {
   const randomSuffix = Math.floor(100 + Math.random() * 900);
-  return `SP${ticketId}${randomSuffix}`;
+  return `SP${ticketId}${Date.now().toString().slice(-4)}${randomSuffix}`;
 }
 
 export default function CheckoutModal() {
@@ -23,8 +23,11 @@ export default function CheckoutModal() {
   const [copiedAcc, setCopiedAcc] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState(false);
 
+  // Biến cờ tuyệt đối để phân biệt Luồng Người Bán Đóng Cọc vs Người Mua
+  const isDepositTx = checkoutTicket?.isDeposit === true || checkoutTicket?.tier?.includes("Cọc");
+
   const handleClose = async () => {
-    if (paymentStatus === "pending" && refCode && checkoutTicket?.id) {
+    if (paymentStatus === "pending" && refCode && checkoutTicket?.id && !isDepositTx) {
       try {
         await supabase.from("transactions").delete().eq("reference_code", refCode);
         await supabase.from("tickets").update({ status: "available" }).eq("id", checkoutTicket.id);
@@ -38,16 +41,21 @@ export default function CheckoutModal() {
   useEffect(() => {
     if (!checkoutTicket || !currentUser) return;
 
+    setDone(false);
+    setPaymentStatus("pending");
+
     const code = generateRefCode(checkoutTicket.id);
     setRefCode(code);
 
-    const fee = Math.round(checkoutTicket.price * 0.05);
-    const total = checkoutTicket.price + fee;
+    // CHUẨN GIÁ: Đóng cọc = giá gốc (25% đã tính). Mua vé = Giá vé + 5% Phí nền tảng
+    const finalAmount = isDepositTx
+      ? checkoutTicket.price
+      : checkoutTicket.price + Math.round(checkoutTicket.price * 0.05);
 
     async function initTransaction() {
       try {
         if (checkoutTicket && checkoutTicket.id) {
-          // Xóa các dòng pending cũ của vé này để tránh trùng lặp
+          // Xóa các dòng pending cũ để chống trùng cờ giao dịch
           await supabase
             .from("transactions")
             .delete()
@@ -58,15 +66,10 @@ export default function CheckoutModal() {
           await supabase.from("transactions").insert({
             ticket_id: checkoutTicket.id,
             buyer_id: currentUser!.id,
-            amount: total,
+            amount: finalAmount,
             status: "pending",
             reference_code: code,
           });
-
-          await supabase
-            .from("tickets")
-            .update({ status: "locked" })
-            .eq("id", checkoutTicket.id);
         }
       } catch (err) {
         console.warn("Lỗi khởi tạo giao dịch:", err);
@@ -78,107 +81,54 @@ export default function CheckoutModal() {
     initTransaction();
   }, [checkoutTicket?.id, currentUser?.id]);
 
-  // Lắng nghe Realtime và Polling tự động
-  useEffect(() => {
-    if (!qrReady || paymentStatus === "paid" || !refCode) return;
-
-    const channel = supabase
-      .channel(`tx-${refCode}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "transactions",
-          filter: `reference_code=eq.${refCode}`,
-        },
-        (payload) => {
-          const st = (payload.new as any)?.status;
-          if (st === "paid" || st === "completed") {
-            completePurchase();
-          }
-        }
-      )
-      .subscribe();
-
-    const interval = setInterval(async () => {
-      try {
-        const { data } = await supabase
-          .from("transactions")
-          .select("status")
-          .eq("reference_code", refCode)
-          .maybeSingle();
-
-        if (data?.status === "paid" || data?.status === "completed") {
-          completePurchase();
-          clearInterval(interval);
-        }
-      } catch (e) {
-        console.warn("Polling error:", e);
-      }
-    }, 3000);
-
-    return () => {
-      clearInterval(interval);
-      supabase.removeChannel(channel);
-    };
-  }, [qrReady, paymentStatus, refCode]);
-
   if (!checkoutTicket) return null;
 
-  const fee = Math.round(checkoutTicket.price * 0.05);
-  const total = checkoutTicket.price + fee;
+  const total = isDepositTx
+    ? checkoutTicket.price
+    : checkoutTicket.price + Math.round(checkoutTicket.price * 0.05);
+
   const qrUrl = refCode
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${total}&addInfo=${refCode}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  // HÀM XỬ LÝ HOÀN TẤT VÀ BẬT POPUP THÀNH CÔNG
+  // HÀM HOÀN TẤT GIAO DỊCH TÁCH BIỆT 100% 2 LUỒNG
   const completePurchase = async () => {
     setPaymentStatus("paid");
 
     try {
       if (refCode) {
-        await supabase
-          .from("transactions")
-          .update({ status: "paid" })
-          .eq("reference_code", refCode);
+        await supabase.from("transactions").update({ status: "paid" }).eq("reference_code", refCode);
       }
 
       if (checkoutTicket && checkoutTicket.id) {
-        // NẾU LÀ GIAO DỊCH ĐÓNG CỌC CỦA NGƯỜI BÁN -> ĐỔI THÀNH AVAILABLE (ĐANG BÁN)
-        if (checkoutTicket.isDeposit) {
-          await supabase
-            .from("tickets")
-            .update({ status: "available" })
-            .eq("id", checkoutTicket.id);
+        if (isDepositTx) {
+          // 🟢 LUỒNG NGƯỜI BÁN ĐÓNG CỌC
+          await supabase.from("tickets").update({ status: "available" }).eq("id", checkoutTicket.id);
+          // TUYỆT ĐỐI KHÔNG addPurchasedTicket() VÀO ĐÂY NỮA
         } else {
-          // NẾU LÀ NGƯỜI MUA MUA VÉ -> ĐỔI THÀNH SOLD
-          await supabase
-            .from("tickets")
-            .update({ status: "sold" })
-            .eq("id", checkoutTicket.id);
+          // 🔵 LUỒNG NGƯỜI MUA MUA VÉ
+          await supabase.from("tickets").update({ status: "sold" }).eq("id", checkoutTicket.id);
+          
+          addToCart();
+          addPurchasedTicket({
+            id: checkoutTicket.id || Date.now(),
+            eventTitle: checkoutTicket.eventTitle,
+            eventImage: checkoutTicket.eventImage,
+            tier: checkoutTicket.tier,
+            date: checkoutTicket.eventDate || "Sắp diễn ra",
+            venue: checkoutTicket.venue || checkoutTicket.city || "TP.HCM",
+            price: total,
+            status: "paid", 
+          });
         }
       }
     } catch (e) {
       console.warn("Lỗi cập nhật DB:", e);
     }
 
-    addToCart();
-    addPurchasedTicket({
-      id: checkoutTicket.id || Date.now(),
-      eventTitle: checkoutTicket.eventTitle,
-      eventImage: checkoutTicket.eventImage,
-      tier: checkoutTicket.tier,
-      date: checkoutTicket.eventDate || "Sắp diễn ra",
-      venue: checkoutTicket.venue || checkoutTicket.city || "TP.HCM",
-      price: total,
-      status: "paid", 
-    });
-
     setDone(true);
   };
 
-  // Nút kiểm tra / xác nhận thanh toán thủ công khi test
   const handleManualVerify = async () => {
     setIsVerifying(true);
     setTimeout(() => {
@@ -204,23 +154,29 @@ export default function CheckoutModal() {
             <div className="flex items-center gap-2">
               <span className="text-xl">🔒</span>
               <div>
-                <h2 className="font-display font-800 text-white text-lg">Thanh toán Chuyển khoản VietQR</h2>
-                <p className="text-[11px] text-gray-400">Giao dịch được bảo vệ ký quỹ SafePass Escrow</p>
+                <h2 className="font-display font-800 text-white text-lg">
+                  {isDepositTx ? "Thanh Toán Cọc Ký Quỹ Mở Bán" : "Thanh Toán Chuyển Khoản VietQR"}
+                </h2>
+                <p className="text-[11px] text-gray-400">Giao dịch được bảo vệ an toàn qua SafePass Escrow</p>
               </div>
             </div>
             <button onClick={handleClose} className="w-8 h-8 rounded-full text-gray-400 hover:text-white cursor-pointer">✕</button>
           </div>
 
           {done ? (
-            /* POPUP THÔNG BÁO THÀNH CÔNG CHUẨN ĐÉT */
+            /* 🔴 POPUP THÔNG BÁO TỰ ĐỘNG CHIA 2 LUỒNG 🔴 */
             <div className="p-10 text-center space-y-5 animate-in fade-in zoom-in duration-300">
               <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center mx-auto text-5xl animate-bounce">
                 🎉
               </div>
               <div>
-                <h3 className="font-display font-800 text-white text-2xl">Thanh Toán & Ký Quỹ Thành Công!</h3>
+                <h3 className="font-display font-800 text-white text-2xl">
+                  {isDepositTx ? "Hoàn Tất Đóng Cọc Ký Quỹ!" : "Thanh Toán Mua Vé Thành Công!"}
+                </h3>
                 <p className="text-sm text-gray-300 leading-relaxed max-w-md mx-auto mt-2">
-                  Hệ thống SafePass đã xác nhận biến động số dư. Giao dịch đã hoàn tất và được bảo vệ qua hợp đồng Escrow.
+                  {isDepositTx 
+                    ? "Giao dịch ký quỹ Escrow đã hoàn tất. Vé của bạn đã được chuyển sang trạng thái ĐANG BÁN trên sàn giao dịch!" 
+                    : "Hệ thống SafePass đã xác nhận biến động số dư. Vé điện tử chính thức đã được chuyển vào mục Vé Của Tôi."}
                 </p>
               </div>
 
@@ -231,20 +187,29 @@ export default function CheckoutModal() {
                 </p>
                 <p className="flex justify-between">
                   <span className="text-gray-400">Sự kiện:</span>
-                  <strong>{checkoutTicket.eventTitle} ({checkoutTicket.tier})</strong>
+                  <strong>{checkoutTicket.eventTitle}</strong>
                 </p>
                 <p className="flex justify-between">
                   <span className="text-gray-400">Trạng thái:</span>
-                  <strong className="text-emerald-400">✓ Đã kích hoạt Escrow an toàn</strong>
+                  <strong className="text-emerald-400">
+                    {isDepositTx ? "✓ Đã mở bán công khai" : "✓ Đã đưa vào kho vé"}
+                  </strong>
                 </p>
               </div>
 
               <div className="flex justify-center gap-3 pt-2">
                 <button
-                  onClick={() => { closeCheckout(); nav("my-tickets"); }}
+                  onClick={() => { 
+                    closeCheckout(); 
+                    if (isDepositTx) {
+                      nav("seller-dash"); // Đóng cọc thì quay lại Dashboard Người Bán
+                    } else {
+                      nav("my-tickets"); // Mua vé thì về Vé của tôi
+                    }
+                  }}
                   className="sp-btn-primary px-8 py-3.5 font-display font-800 text-sm cursor-pointer shadow-xl"
                 >
-                  Xem trong kho vé của tôi →
+                  {isDepositTx ? "Quản lý Bảng Điều Khiển →" : "Xem trong kho vé của tôi →"}
                 </button>
               </div>
             </div>
@@ -322,7 +287,6 @@ export default function CheckoutModal() {
                     </div>
                   </div>
 
-                  {/* NÚT KIỂM TRA / XÁC NHẬN CHỦ ĐỘNG ĐỂ BẬT POPUP */}
                   <button
                     onClick={handleManualVerify}
                     disabled={isVerifying}
@@ -338,9 +302,9 @@ export default function CheckoutModal() {
                   <p className="sp-filter-label mb-3">Tóm tắt đơn hàng</p>
                   <div className="p-3 bg-white/[0.02] rounded-xl border border-white/5 space-y-2 text-xs">
                     <p className="font-bold text-white">{checkoutTicket.eventTitle}</p>
-                    <p className="text-purple-400">{checkoutTicket.tier}</p>
-                    <div className="flex justify-between text-gray-400 pt-2 border-t border-white/5">
-                      <span>Tổng tiền</span>
+                    <p className="text-purple-400 truncate">{checkoutTicket.tier}</p>
+                    <div className="flex justify-between text-gray-400 pt-2 border-t border-white/5 mt-2">
+                      <span>{isDepositTx ? "Tiền cọc" : "Tổng tiền"}</span>
                       <span className="font-bold text-white">{fmt(total)}</span>
                     </div>
                   </div>
