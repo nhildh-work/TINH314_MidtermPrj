@@ -37,6 +37,7 @@ const STATUS_CFG = {
   available: { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
   locked:    { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
   completed: { label: "ĐÃ BÁN THÀNH CÔNG", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
+  disputed:  { label: "🚨 TRANH CHẤP (ĐÃ KHÓA TIỀN VÉ NÀY)", color: "#F87171", bg: "rgba(248,113,113,0.15)" },
 } as const;
 
 function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
@@ -282,7 +283,7 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
           </button>
         ) : (
           <p className="text-xs text-center text-gray-400">
-            {listing.status === "locked" ? "Vé đang được giao dịch (Tạm khóa, không thể hủy)." : "Vé đã bán thành công, không thể hủy."}
+            {listing.status === "locked" ? "Vé đang được giao dịch (Tạm khóa, không thể hủy)." : "Vé đã bán hoặc bị khiếu nại, không thể hủy."}
           </p>
         )}
       </div>
@@ -306,31 +307,51 @@ export default function SellerDash() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // LẮNG NGHE TRANH CHẤP KHẨN CẤP DÀNH CHO NGƯỜI BÁN
   useEffect(() => {
-    async function fetchDisputes() {
+    const uid = currentUser?.id;
+    if (!uid) return;
+
+    async function loadSellerTickets() {
       try {
-        const { data } = await supabase
-          .from("disputes")
-          .select("*, tickets(*)")
+        const { data, error } = await supabase
+          .from("tickets")
+          .select("*")
+          .eq("seller_id", uid)
           .order("created_at", { ascending: false });
 
-        if (data) setSellerDisputes(data);
+        if (!error && data) {
+          const mapped: MyListing[] = data.map((t: any) => ({
+            id: Number(t.id),
+            eventTitle: t.event_name,
+            tier: t.tier || "Standard",
+            price: Number(t.price),
+            // Đóng băng ĐỘC LẬP vé bị disputed, vé completed khác vẫn hoàn toàn bình thường
+            status: t.status === "disputed" ? "disputed" : t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
+            date: t.event_date || "Sắp diễn ra",
+          }));
+          setSellerTickets(mapped);
+        }
+
+        const { data: disData } = await supabase
+          .from("disputes")
+          .select("*, tickets(*)")
+          .eq("seller_id", uid);
+
+        if (disData) setSellerDisputes(disData);
       } catch (err) {
-        console.warn("Lỗi tải disputes cho người bán:", err);
+        console.error("Lỗi khi tải vé người bán từ Supabase:", err);
       }
     }
 
-    fetchDisputes();
+    loadSellerTickets();
 
     const channel = supabase
-      .channel("seller_dispute_notifications")
+      .channel("seller_realtime_channel")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "disputes" },
+        { event: "*", schema: "public", table: "tickets" },
         () => {
-          alert("🚨 CẢNH BÁO KHẨN CẤP: Có 1 đơn hàng của bạn vừa bị Người mua gửi khiếu nại tại cổng soát vé!");
-          fetchDisputes();
+          loadSellerTickets();
         }
       )
       .subscribe();
@@ -338,7 +359,7 @@ export default function SellerDash() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     if (currentProfile) {
@@ -391,7 +412,7 @@ export default function SellerDash() {
         }
 
         if (!name) {
-          setErrorMsg("Không thể tra cứu thông tin từ ngân hàng. Vui lòng kiểm tra lại số tài khoản hoặc chọn đúng ngân hàng!");
+          setErrorMsg("Không thể tra cứu thông tin từ ngân hàng. Vui lòng kiểm tra lại số tài khoản!");
           setFetchedHolder("");
           return;
         }
@@ -415,36 +436,6 @@ export default function SellerDash() {
 
     return () => clearTimeout(timer);
   }, [accountNumber, bankCode, currentProfile?.full_name]);
-
-  useEffect(() => {
-    const uid = currentUser?.id;
-    if (!uid) return;
-    async function loadSellerTickets() {
-      try {
-        const { data, error } = await supabase
-          .from("tickets")
-          .select("*")
-          .eq("seller_id", uid)
-          .order("created_at", { ascending: false });
-
-        if (!error && data) {
-          const mapped: MyListing[] = data.map((t: any) => ({
-            id: Number(t.id),
-            eventTitle: t.event_name,
-            tier: t.tier || "Standard",
-            price: Number(t.price),
-            status: t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
-            date: t.event_date || "Sắp diễn ra",
-          }));
-          setSellerTickets(mapped);
-        }
-      } catch (err) {
-        console.error("Lỗi khi tải vé người bán từ Supabase:", err);
-      }
-    }
-
-    loadSellerTickets();
-  }, [currentUser]);
 
   const handleVerifyAndSaveBank = async () => {
     setErrorMsg(null);
@@ -504,6 +495,7 @@ export default function SellerDash() {
   }
 
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
+  // SỐ DƯ RÚT TIỀN: CHỈ CỘNG TIỀN VÉ THÀNH CÔNG ('completed'). CÁC VÉ 'disputed' BỊ KHÓA RIÊNG KHÔNG ẢNH HƯỞNG
   const soldListings = allSellerListings.filter(l => l.status === "completed");
   const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
 
@@ -527,9 +519,9 @@ export default function SellerDash() {
         />
       )}
 
-      {/* KHU VỰC THÔNG BÁO CẢNH BÁO TRANH CHẤP DÀNH CHO NGƯỜI BÁN */}
+      {/* CẢNH BÁO TRANH CHẤP DÀNH CHO NGƯỜI BÁN */}
       {sellerDisputes.length > 0 && (
-        <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between animate-pulse">
+        <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-2xl">🚨</span>
             <div>
@@ -537,7 +529,7 @@ export default function SellerDash() {
                 CẢNH BÁO TRANH CHẤP KHẨN CẤP ({sellerDisputes.length} đơn)
               </h3>
               <p className="text-xs text-gray-300">
-                Có vé đang bị người mua khiếu nại không vào được cổng. Tiền ký quỹ đang bị tạm khóa!
+                Khoản thanh toán của vé bị khiếu nại đang bị đóng băng độc lập. Các vé thành công khác vẫn rút tiền bình thường.
               </p>
             </div>
           </div>

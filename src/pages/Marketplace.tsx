@@ -25,7 +25,6 @@ function MinimapModal({ url, onClose }: { url: string; onClose: () => void }) {
   );
 }
 
-// Modal xem chi tiết thông tin vé trước khi quyết định mua
 function TicketDetailModal({ ticket, onClose }: { ticket: TicketListing; onClose: () => void }) {
   const { openCheckout, isLoggedIn, setAuthModal } = useApp();
   const [showMap, setShowMap] = useState(false);
@@ -101,7 +100,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketListing; onClose
   );
 }
 
-function TicketCard({ ticket }: { ticket: TicketListing }) {
+function TicketCard({ ticket, totalAvailableCount }: { ticket: TicketListing; totalAvailableCount: number }) {
   const { openCheckout, isLoggedIn, setAuthModal, t, lang } = useApp();
   const [showMap, setShowMap] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
@@ -115,12 +114,10 @@ function TicketCard({ ticket }: { ticket: TicketListing }) {
         <TicketDetailModal ticket={ticket} onClose={() => setShowDetail(false)} />
       )}
 
-      {/* Bấm vào card vé sẽ bật bảng chi tiết */}
       <div 
         onClick={() => setShowDetail(true)}
         className="sp-card sp-card-hover flex flex-col overflow-hidden cursor-pointer"
       >
-        {/* Image */}
         <div className="relative h-44 overflow-hidden" style={{ borderRadius: "15px 15px 0 0" }}>
           <img
             src={ticket.eventImage}
@@ -156,9 +153,21 @@ function TicketCard({ ticket }: { ticket: TicketListing }) {
           <h3 className="font-display font-700 text-white text-sm leading-snug line-clamp-2 mb-0.5">
             {ticket.eventTitle}
           </h3>
-          <p className="text-xs mb-3" style={{ color: "#6b7280" }}>
+          <p className="text-xs mb-2" style={{ color: "#6b7280" }}>
             📍 {ticket.section} · {ticket.seat} · {ticket.city}
           </p>
+
+          {/* BỘ ĐẾM SỐ LƯỢNG VÉ CÒN LẠI */}
+          <div className="mb-3 flex items-center gap-1.5">
+            <span className="text-[11px] font-display font-700 px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30">
+              🎟️ Còn lại: <strong className="text-amber-300">{totalAvailableCount}</strong> vé
+            </span>
+            {totalAvailableCount === 1 && (
+              <span className="text-[10px] font-bold text-red-400 animate-pulse">
+                🔥 Chỉ còn 1 vé!
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-2 pb-3 mb-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
             <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-display font-700 text-white shrink-0" style={{ background: "linear-gradient(135deg,#7C3AED,#A855F7)" }}>
@@ -173,11 +182,11 @@ function TicketCard({ ticket }: { ticket: TicketListing }) {
             </div>
             <button
               onClick={(e) => {
-                e.stopPropagation(); // Chặn lan truyền để không bật modal chi tiết khi chỉ muốn bấm Mua ngay
+                e.stopPropagation();
                 if (!isLoggedIn) { setAuthModal("login"); return; }
                 openCheckout(ticket);
               }}
-              className="sp-btn-primary text-xs px-4 py-2"
+              className="sp-btn-primary text-xs px-4 py-2 cursor-pointer"
             >
               {t.buyNow}
             </button>
@@ -227,7 +236,7 @@ export default function Marketplace() {
 
           if (rawData) {
             const mapped: TicketListing[] = rawData.map((item: any) => ({
-              id: Number(item.id),
+              id: item.id,
               eventId: 0,
               eventTitle: item.event_name,
               eventImage: item.event_image || "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop&auto=format",
@@ -251,7 +260,7 @@ export default function Marketplace() {
 
         if (data) {
           const mapped: TicketListing[] = data.map((item: any) => ({
-            id: Number(item.id),
+            id: item.id,
             eventId: 0,
             eventTitle: item.event_name,
             eventImage: item.event_image || "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop&auto=format",
@@ -297,7 +306,7 @@ export default function Marketplace() {
   }, []);
 
   const combined = [...supabaseTickets, ...dynamicMarketListings];
-  const seenIds = new Set<number>();
+  const seenIds = new Set<any>();
   const allListings = combined.filter(tk => {
     if (seenIds.has(tk.id)) return false;
     seenIds.add(tk.id);
@@ -326,17 +335,22 @@ export default function Marketplace() {
     setSelCity("all"); setSelEvent("all");
   };
 
+  // TÍNH BỘ ĐẾM SỐ LƯỢNG VÉ CÒN LẠI THEO TÊN SỰ KIỆN + HẠNG VÉ
+  const getAvailableCount = (ticket: TicketListing) => {
+    return allListings.filter(
+      t => t.eventTitle === ticket.eventTitle && t.tier === ticket.tier
+    ).length;
+  };
+
   return (
     <div className="max-w-[1680px] mx-auto px-5 lg:px-8 py-8 flex gap-7">
-      {/* Sidebar */}
       <aside className="w-64 shrink-0 hidden lg:block">
         <div className="sp-card p-5 sticky top-[88px] space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="font-display font-800 text-white text-sm">{t.filtersLabel}</h2>
-            <button onClick={resetFilters} className="text-xs" style={{ color: "#8B5CF6" }}>{t.clearAll}</button>
+            <button onClick={resetFilters} className="text-xs font-bold cursor-pointer" style={{ color: "#8B5CF6" }}>{t.clearAll}</button>
           </div>
 
-          {/* Event */}
           <div>
             <p className="sp-filter-label mb-2">{t.eventLabel}</p>
             <select value={selEvent} onChange={e => setSelEvent(e.target.value)} className="sp-select">
@@ -345,7 +359,6 @@ export default function Marketplace() {
             </select>
           </div>
 
-          {/* Price range */}
           <div>
             <p className="sp-filter-label mb-2">{t.priceRange}</p>
             <div className="flex gap-2">
@@ -354,7 +367,6 @@ export default function Marketplace() {
             </div>
           </div>
 
-          {/* Tier */}
           <div>
             <p className="sp-filter-label mb-2">{t.tierLabel}</p>
             <div className="space-y-1.5">
@@ -367,7 +379,6 @@ export default function Marketplace() {
             </div>
           </div>
 
-          {/* City */}
           <div>
             <p className="sp-filter-label mb-2">{t.cityLabel}</p>
             <div className="space-y-1.5">
@@ -382,16 +393,14 @@ export default function Marketplace() {
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex-1 min-w-0">
-        {/* Hero events strip */}
         <div className="mb-6 overflow-x-auto pb-2">
           <div className="flex gap-3" style={{ minWidth: "max-content" }}>
             {EVENTS.map(ev => (
               <button
                 key={ev.id}
                 onClick={() => { setSelectedEvent(ev); nav("event-detail"); }}
-                className="relative rounded-2xl overflow-hidden shrink-0 group"
+                className="relative rounded-2xl overflow-hidden shrink-0 group cursor-pointer"
                 style={{ width: 240, height: 120 }}
               >
                 <img src={ev.image} alt={ev.title} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
@@ -411,7 +420,6 @@ export default function Marketplace() {
           </div>
         </div>
 
-        {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
             <h1 className="font-display font-800 text-white text-2xl">{t.marketplaceTitle}</h1>
@@ -424,7 +432,6 @@ export default function Marketplace() {
           </select>
         </div>
 
-        {/* Grid */}
         {filtered.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-4xl mb-3">🔍</p>
@@ -433,7 +440,9 @@ export default function Marketplace() {
           </div>
         ) : (
           <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-            {filtered.map(tk => <TicketCard key={tk.id} ticket={tk} />)}
+            {filtered.map(tk => (
+              <TicketCard key={tk.id} ticket={tk} totalAvailableCount={getAvailableCount(tk)} />
+            ))}
           </div>
         )}
       </div>
