@@ -25,7 +25,7 @@ export default function NewListing() {
   const [venue, setVenue] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [price, setPrice] = useState("");
-  const [quantity, setQuantity] = useState("1"); // Ô nhập số lượng vé
+  const [quantity, setQuantity] = useState("1");
 
   const [ticketFile, setTicketFile] = useState<File | null>(null);
   const [mapFile, setMapFile] = useState<File | null>(null);
@@ -33,7 +33,6 @@ export default function NewListing() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  // 25% Deposit VietQR State
   const [depositRefCode, setDepositRefCode] = useState<string>("");
   const [copiedDepositCode, setCopiedDepositCode] = useState(false);
   const [copiedAcc, setCopiedAcc] = useState(false);
@@ -46,7 +45,7 @@ export default function NewListing() {
   const numPrice = Number(price) || 0;
   const numQty = Math.max(1, parseInt(quantity) || 1);
   const singleDeposit = Math.round(numPrice * 0.25);
-  const totalDepositAmount = singleDeposit * numQty; // Tổng cọc nhân theo số lượng
+  const totalDepositAmount = singleDeposit * numQty;
   const payoutOnSale = (singleDeposit + Math.round(numPrice * 0.95)) * numQty;
 
   const step1Valid = eventName.trim() && tier.trim() && city.trim() && eventDate.trim();
@@ -56,7 +55,6 @@ export default function NewListing() {
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${totalDepositAmount}&addInfo=${encodeURIComponent(depositRefCode)}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  // TỰ ĐỘNG KHỞI TẠO N VÉ VÀ LẮNG NGHE WEBHOOK KHI VÀO BƯỚC 3
   const handleProceedToStep3 = async () => {
     if (!currentUser) {
       setAuthModal("login");
@@ -72,7 +70,6 @@ export default function NewListing() {
       setLoading(true);
       setErrorMsg(null);
 
-      // 1. Tạo danh sách N vé trùng lặp theo số lượng nhập vào
       const ticketsToInsert = [];
       for (let i = 0; i < numQty; i++) {
         ticketsToInsert.push({
@@ -90,7 +87,6 @@ export default function NewListing() {
         });
       }
 
-      // Insert đồng thời tất cả các vé vào Supabase
       const { data: insertedTickets, error: ticketError } = await supabase
         .from("tickets")
         .insert(ticketsToInsert)
@@ -98,7 +94,6 @@ export default function NewListing() {
 
       if (ticketError) throw ticketError;
 
-      // 2. Tạo bản ghi transaction chờ thanh toán cọc tổng
       if (insertedTickets && insertedTickets.length > 0) {
         await supabase.from("transactions").insert({
           ticket_id: insertedTickets[0].id,
@@ -108,7 +103,6 @@ export default function NewListing() {
           reference_code: depositRefCode,
         });
 
-        // 3. ĐĂNG KÝ SUPABASE REALTIME: Tự động nhận diện khi SePay webhook xác nhận thanh toán cọc thành công
         const channel = supabase
           .channel(`deposit_listener_${insertedTickets[0].id}`)
           .on(
@@ -122,7 +116,6 @@ export default function NewListing() {
             async (payload: any) => {
               const st = payload.new.status;
               if (st === 'paid' || st === 'completed') {
-                // Cập nhật TẤT CẢ các vé vừa đăng thành 'available' để đưa lên sàn
                 const insertedIds = insertedTickets.map((t: any) => t.id);
                 await supabase.from('tickets').update({ status: 'available' }).in('id', insertedIds);
 
@@ -433,7 +426,7 @@ export default function NewListing() {
 
                 {errorMsg && (
                   <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
-                    ⚠️ {errorMsg}
+                    ⚠️️ {errorMsg}
                   </div>
                 )}
 
@@ -584,7 +577,19 @@ export default function NewListing() {
                 </div>
 
                 <div className="pt-2 flex justify-start">
-                  <button onClick={() => setStep(2)} className="sp-btn-ghost py-2.5 px-4 text-xs font-display font-700 cursor-pointer">
+                  <button 
+                    onClick={async () => {
+                      if (depositRefCode) {
+                        try {
+                          await supabase.from("transactions").delete().eq("reference_code", depositRefCode);
+                        } catch (e) {
+                          console.warn("Lỗi dọn dẹp cọc pending:", e);
+                        }
+                      }
+                      setStep(2);
+                    }} 
+                    className="sp-btn-ghost py-2.5 px-4 text-xs font-display font-700 cursor-pointer"
+                  >
                     ← Quay lại sửa thông tin
                   </button>
                 </div>

@@ -214,7 +214,6 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // FIX LỖI KHÓA NGOẠI: Xóa transactions liên quan trước khi xóa tickets
   const handleDeleteListing = async () => {
     if (!window.confirm("Bạn có chắc chắn muốn hủy và xóa niêm yết vé này không?")) return;
     setLoading(true);
@@ -268,7 +267,7 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
 
         {errorMsg && (
           <div className="mb-4 p-2.5 text-xs bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg">
-            ⚠️️ {errorMsg}
+            ⚠ {errorMsg}
           </div>
         )}
 
@@ -296,16 +295,50 @@ export default function SellerDash() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [detailListing, setDetailListing] = useState<MyListing | null>(null);
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
+  const [sellerDisputes, setSellerDisputes] = useState<any[]>([]);
 
   const [bankCode, setBankCode] = useState(currentProfile?.bank_name || "MB Bank");
   const [accountNumber, setAccountNumber] = useState(currentProfile?.bank_account || "");
   
-  // Strict Live Interbank Tracking States
   const [fetchedHolder, setFetchedHolder] = useState<string>("");
   const [isLookingUp, setIsLookingUp] = useState<boolean>(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // LẮNG NGHE TRANH CHẤP KHẨN CẤP DÀNH CHO NGƯỜI BÁN
+  useEffect(() => {
+    async function fetchDisputes() {
+      try {
+        const { data } = await supabase
+          .from("disputes")
+          .select("*, tickets(*)")
+          .order("created_at", { ascending: false });
+
+        if (data) setSellerDisputes(data);
+      } catch (err) {
+        console.warn("Lỗi tải disputes cho người bán:", err);
+      }
+    }
+
+    fetchDisputes();
+
+    const channel = supabase
+      .channel("seller_dispute_notifications")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "disputes" },
+        () => {
+          alert("🚨 CẢNH BÁO KHẨN CẤP: Có 1 đơn hàng của bạn vừa bị Người mua gửi khiếu nại tại cổng soát vé!");
+          fetchDisputes();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     if (currentProfile) {
@@ -314,7 +347,6 @@ export default function SellerDash() {
     }
   }, [currentProfile]);
 
-  // LIVE INTERBANK LOOKUP: Bắt buộc lấy đúng tên từ API ngân hàng, không dùng fallback giả mạo
   useEffect(() => {
     const trimmedAcc = accountNumber.trim();
     if (!trimmedAcc || trimmedAcc.length < 6) {
@@ -330,9 +362,8 @@ export default function SellerDash() {
 
       try {
         let name = "";
-        // 1. Gọi Supabase Edge Function 'lookup-bank'
         try {
-          const { data, error } = await supabase.functions.invoke("lookup-bank", {
+          const { data } = await supabase.functions.invoke("lookup-bank", {
             body: { bankCode, accountNumber: trimmedAcc },
           });
           if (data?.success && data?.data?.accountName) {
@@ -342,7 +373,6 @@ export default function SellerDash() {
           console.warn("Edge function lookup notice:", fnErr);
         }
 
-        // 2. Fallback sang VietQR API nếu Edge Function chưa phản hồi
         if (!name) {
           try {
             const bin = BANK_BINS[bankCode] || "970422";
@@ -424,7 +454,6 @@ export default function SellerDash() {
     const normRegistered = normalizeName(registeredName);
     const normHolder = normalizeName(fetchedHolder);
 
-    // BẮT BUỘC PHẢI KHỚP 100% MỚI CHO LƯU
     if (!fetchedHolder || normHolder !== normRegistered) {
       setErrorMsg("Tên chủ tài khoản bắt buộc phải khớp 100% với tên trên CCCD đã định danh để bảo mật chống scam!");
       return;
@@ -498,6 +527,29 @@ export default function SellerDash() {
         />
       )}
 
+      {/* KHU VỰC THÔNG BÁO CẢNH BÁO TRANH CHẤP DÀNH CHO NGƯỜI BÁN */}
+      {sellerDisputes.length > 0 && (
+        <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between animate-pulse">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🚨</span>
+            <div>
+              <h3 className="font-display font-800 text-red-400 text-sm">
+                CẢNH BÁO TRANH CHẤP KHẨN CẤP ({sellerDisputes.length} đơn)
+              </h3>
+              <p className="text-xs text-gray-300">
+                Có vé đang bị người mua khiếu nại không vào được cổng. Tiền ký quỹ đang bị tạm khóa!
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => nav("dispute-center")}
+            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-display font-700 text-xs rounded-xl transition-all cursor-pointer"
+          >
+            Vào Trung tâm tranh chấp →
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-7">
         <div>
           <h1 className="font-display font-800 text-white text-2xl">{t.sellerDashTitle}</h1>
@@ -528,7 +580,6 @@ export default function SellerDash() {
         ))}
       </div>
 
-      {/* Seller Bank Account Setup with Strict Live Interbank Tracking */}
       <div className="sp-card p-6 mb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-4 border-b border-white/5 mb-4">
           <div>
@@ -583,7 +634,6 @@ export default function SellerDash() {
           </div>
         </div>
 
-        {/* Live Lookup Result Preview Box */}
         {accountNumber.trim().length >= 6 && (
           <div className="mt-4 p-4 rounded-xl bg-gray-950/60 border border-gray-800 space-y-2">
             <div className="flex items-center justify-between text-xs">

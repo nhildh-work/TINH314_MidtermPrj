@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { useApp } from "../context";
 import type { PendingDispute } from "../context";
+import { supabase } from "../lib/supabaseClient";
 
 export default function Dispute() {
-  const { disputeTicket, closeDispute, nav, addPendingDispute, t } = useApp();
+  const { disputeTicket, closeDispute, nav, addPendingDispute, addReportedTicket, currentUser, t } = useApp();
   const [reason, setReason] = useState("");
   const [detail, setDetail] = useState("");
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // Buyer Refund Bank Account fields (No strict name match needed)
   const [refundBankNum, setRefundBankNum] = useState("");
   const [refundBankName, setRefundBankName] = useState("MB Bank");
   const [refundBankHolder, setRefundBankHolder] = useState("");
@@ -17,7 +18,7 @@ export default function Dispute() {
 
   const canSubmit = reason && videoFile && refundBankNum.trim() && refundBankHolder.trim();
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setRefundError(null);
     if (!reason || !videoFile) {
       setRefundError("Vui lòng chọn loại sự cố và tải lên video bằng chứng!");
@@ -29,27 +30,64 @@ export default function Dispute() {
       return;
     }
 
-    if (!disputeTicket) return;
+    if (!disputeTicket || !currentUser) return;
 
-    const now = new Date();
-    const ts = `${now.getDate().toString().padStart(2,"0")}/${(now.getMonth()+1).toString().padStart(2,"0")}/${now.getFullYear()} · ${now.getHours().toString().padStart(2,"0")}:${now.getMinutes().toString().padStart(2,"0")}`;
-    
-    const d: PendingDispute = {
-      id: `D-${Date.now()}`,
-      ticketTitle: disputeTicket.eventTitle,
-      tier: disputeTicket.tier,
-      amount: disputeTicket.price,
-      buyerReason: reason,
-      buyerDetail: detail,
-      buyerVideo: videoFile!.name,
-      buyerSubmittedAt: ts,
-      refundBankNum: refundBankNum.trim(),
-      refundBankName: refundBankName.trim(),
-      refundBankHolder: refundBankHolder.trim().toUpperCase(),
-    };
+    try {
+      setLoading(true);
 
-    addPendingDispute(d);
-    setSubmitted(true);
+      // 1. Ghi trực tiếp bản ghi khiếu nại vào bảng `disputes` trên Supabase
+      const { data: disputeData, error: disputeError } = await supabase
+        .from("disputes")
+        .insert({
+          ticket_id: disputeTicket.id,
+          buyer_id: currentUser.id,
+          seller_id: (disputeTicket as any).sellerId || null,
+          reason: reason,
+          description: detail,
+          video_url: videoFile.name,
+          refund_bank_account: refundBankNum.trim(),
+          refund_bank_name: refundBankName.trim(),
+          refund_account_holder: refundBankHolder.trim().toUpperCase(),
+          status: "under_review",
+        })
+        .select()
+        .single();
+
+      if (disputeError) {
+        console.warn("Lưu dispute Supabase notice:", disputeError.message);
+      }
+
+      // 2. Cập nhật trạng thái vé trong bảng `tickets` thành 'disputed'
+      await supabase
+        .from("tickets")
+        .update({ status: "disputed" })
+        .eq("id", disputeTicket.id);
+
+      const now = new Date();
+      const ts = `${now.getDate().toString().padStart(2,"0")}/${(now.getMonth()+1).toString().padStart(2,"0")}/${now.getFullYear()} · ${now.getHours().toString().padStart(2,"0")}:${now.getMinutes().toString().padStart(2,"0")}`;
+      
+      const d: PendingDispute = {
+        id: disputeData?.id ? String(disputeData.id) : `D-${Date.now()}`,
+        ticketTitle: disputeTicket.eventTitle,
+        tier: disputeTicket.tier,
+        amount: disputeTicket.price,
+        buyerReason: reason,
+        buyerDetail: detail,
+        buyerVideo: videoFile.name,
+        buyerSubmittedAt: ts,
+        refundBankNum: refundBankNum.trim(),
+        refundBankName: refundBankName.trim(),
+        refundBankHolder: refundBankHolder.trim().toUpperCase(),
+      };
+
+      addPendingDispute(d);
+      addReportedTicket(disputeTicket.id);
+      setSubmitted(true);
+    } catch (err: any) {
+      setRefundError("Có lỗi xảy ra: " + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (submitted) {
@@ -108,7 +146,6 @@ export default function Dispute() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-        {/* Incident details */}
         <div className="sp-card p-5 space-y-4">
           <h2 className="font-display font-700 text-white text-base">1. Chi tiết sự cố tại cổng soát vé</h2>
 
@@ -135,7 +172,6 @@ export default function Dispute() {
           </div>
         </div>
 
-        {/* Video proof */}
         <div className="sp-card p-5 space-y-4">
           <h2 className="font-display font-700 text-white text-base">2. Bằng chứng video thực tế tại cổng</h2>
 
@@ -176,7 +212,6 @@ export default function Dispute() {
         </div>
       </div>
 
-      {/* Buyer Refund Bank Account Form (No name match constraint) */}
       <div className="sp-card p-5 mb-5">
         <div className="pb-3 border-b border-white/5 mb-4">
           <h2 className="font-display font-700 text-white text-base flex items-center gap-2">
@@ -232,11 +267,11 @@ export default function Dispute() {
 
       <button
         onClick={handleSubmit}
-        disabled={!canSubmit}
+        disabled={!canSubmit || loading}
         className="w-full py-3.5 rounded-xl font-display font-700 text-white text-sm transition-all hover:opacity-90 disabled:opacity-35 cursor-pointer"
         style={{ background: "linear-gradient(135deg,#991B1B,#DC2626)" }}
       >
-        Gửi Báo Cáo & Yêu Cầu Hoàn Tiền 100% →
+        {loading ? "Đang gửi báo cáo..." : "Gửi Báo Cáo & Yêu Cầu Hoàn Tiền 100% →"}
       </button>
     </div>
   );

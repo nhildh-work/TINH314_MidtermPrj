@@ -22,6 +22,19 @@ export default function CheckoutModal() {
   const [copiedAcc, setCopiedAcc] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState(false);
 
+  // Xử lý dọn dẹp transaction pending rác khi tắt Modal mà chưa thanh toán
+  const handleClose = async () => {
+    if (paymentStatus === "pending" && refCode && checkoutTicket?.id) {
+      try {
+        await supabase.from("transactions").delete().eq("reference_code", refCode);
+        await supabase.from("tickets").update({ status: "available" }).eq("id", checkoutTicket.id);
+      } catch (err) {
+        console.warn("Lỗi dọn dẹp giao dịch pending:", err);
+      }
+    }
+    closeCheckout();
+  };
+
   useEffect(() => {
     if (!checkoutTicket) return;
     if (!currentUser) {
@@ -117,11 +130,9 @@ export default function CheckoutModal() {
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${total}&addInfo=${refCode}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  // HÀM HOÀN TẤT MUA VÉ: ĐẨY TRẠNG THÁI 'sold' LÊN SUPABASE VÀ ĐƯA VÉ VÀO 'VÉ CỦA TÔI' VỚI TRẠNG THÁI 'paid'
   const completePurchase = async () => {
     setPaymentStatus("paid");
 
-    // 1. Đổi vé sang 'sold' trên Supabase ngay lập tức để ẩn khỏi Trang chủ Marketplace
     if (checkoutTicket && checkoutTicket.id) {
       try {
         await supabase
@@ -135,7 +146,6 @@ export default function CheckoutModal() {
 
     addToCart();
 
-    // 2. Đưa vé vào danh sách vé đã mua với trạng thái 'paid' (SẴN SÀNG QUÉT CỔNG, KHÔNG PHẢI ĐÃ VÀO CỔNG)
     addPurchasedTicket({
       id: checkoutTicket.id || Date.now(),
       eventTitle: checkoutTicket.eventTitle,
@@ -155,7 +165,7 @@ export default function CheckoutModal() {
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
         style={{ background: "rgba(0,0,0,0.88)", backdropFilter: "blur(12px)" }}
-        onClick={closeCheckout}
+        onClick={handleClose}
       >
         <div
           className="sp-card w-full max-w-2xl overflow-y-auto"
@@ -172,7 +182,7 @@ export default function CheckoutModal() {
               </div>
             </div>
             <button
-              onClick={closeCheckout}
+              onClick={handleClose}
               className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 text-gray-400 hover:text-white"
             >
               ✕
@@ -206,7 +216,6 @@ export default function CheckoutModal() {
             </div>
           ) : (
             <div className="flex flex-col md:flex-row">
-              {/* VietQR Bank Transfer Column */}
               <div className="flex-1 p-6" style={{ borderRight: "1px solid rgba(255,255,255,0.05)" }}>
                 <div
                   className="rounded-2xl p-4 flex flex-col items-center"
@@ -217,7 +226,6 @@ export default function CheckoutModal() {
                     <span>Quét mã QR bằng App Ngân hàng bất kỳ</span>
                   </div>
 
-                  {/* QR Image */}
                   <div className="relative mb-4 bg-white p-2 rounded-2xl shadow-xl">
                     {qrUrl ? (
                       <img
@@ -233,7 +241,6 @@ export default function CheckoutModal() {
                     )}
                   </div>
 
-                  {/* Bank Transfer Details Box */}
                   <div className="w-full rounded-xl p-3.5 bg-black/50 border border-white/8 space-y-2.5 text-xs">
                     <div className="flex justify-between items-center">
                       <span className="text-gray-400">Ngân hàng:</span>
@@ -311,7 +318,6 @@ export default function CheckoutModal() {
                 </div>
               </div>
 
-              {/* Order summary column */}
               <div className="w-full md:w-72 p-6 shrink-0 flex flex-col justify-between">
                 <div>
                   <p className="sp-filter-label mb-3">Tóm tắt đơn hàng</p>
