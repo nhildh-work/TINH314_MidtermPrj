@@ -34,15 +34,13 @@ interface AppCtx {
   t: T;
   dynamicMarketListings: TicketListing[];
   setDynamicMarketListings: (listings: TicketListing[]) => void;
-  ticketsListed: () => TicketListing[];
+  ticketsListed: (() => TicketListing[]) & TicketListing[];
   pendingDisputes: PendingDispute[];
   addPendingDispute: (d: PendingDispute) => void;
   reportedTicketIds: number[];
   addReportedTicket: (id: number) => void;
-  // Purchased tickets
   purchasedTickets: MyTicket[];
   addPurchasedTicket: (t: MyTicket) => void;
-  // User Management
   registeredUsers: ProfileRecord[];
   showUsersModal: boolean;
   setShowUsersModal: (show: boolean) => void;
@@ -117,7 +115,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [pendingDisputes, setPendingDisputes] = useState<PendingDispute[]>([]);
   const [reportedTicketIds, setReportedTicketIds] = useState<number[]>([]);
 
-  // Registered users state
   const [registeredUsers, setRegisteredUsers] = useState<ProfileRecord[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_USERS_KEY);
@@ -133,7 +130,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [showUsersModal, setShowUsersModal] = useState(false);
 
-  // Purchased tickets state
   const [purchasedTickets, setPurchasedTickets] = useState<MyTicket[]>(() => {
     try {
       const stored = localStorage.getItem("safepass_purchased_tickets");
@@ -159,7 +155,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // Save registered users to localStorage whenever updated
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(registeredUsers));
@@ -168,7 +163,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [registeredUsers]);
 
-  // Load saved active profile from local storage on mount
   useEffect(() => {
     try {
       const savedProfileStr = localStorage.getItem(STORAGE_CURRENT_PROFILE_KEY);
@@ -393,7 +387,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lang, setLang,
       t: translations[lang],
       dynamicMarketListings, setDynamicMarketListings,
-      ticketsListed: () => dynamicMarketListings,
+      ticketsListed: Object.assign(() => dynamicMarketListings, dynamicMarketListings),
       pendingDisputes,
       addPendingDispute: (d) => setPendingDisputes(prev => [d, ...prev]),
       reportedTicketIds,
