@@ -34,7 +34,7 @@ interface AppCtx {
   t: T;
   dynamicMarketListings: TicketListing[];
   setDynamicMarketListings: (listings: TicketListing[]) => void;
-  ticketsListed: (() => TicketListing[]) & TicketListing[];
+  ticketsListed: any;
   pendingDisputes: PendingDispute[];
   addPendingDispute: (d: PendingDispute) => void;
   reportedTicketIds: number[];
@@ -369,6 +369,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Bulletproof proxy supporting both function call and array operations
+  const ticketsListed = new Proxy(
+    () => dynamicMarketListings,
+    {
+      get(target, prop, receiver) {
+        if (prop in Array.prototype || typeof prop === 'symbol' || !isNaN(Number(prop))) {
+          return Reflect.get(dynamicMarketListings, prop, dynamicMarketListings);
+        }
+        const val = Reflect.get(target, prop, receiver);
+        return typeof val === 'function' ? val.bind(target) : val;
+      },
+      apply() {
+        return dynamicMarketListings;
+      },
+    }
+  );
+
   return (
     <Ctx.Provider value={{
       view, nav, role, setRole,
@@ -387,7 +404,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lang, setLang,
       t: translations[lang],
       dynamicMarketListings, setDynamicMarketListings,
-      ticketsListed: Object.assign(() => dynamicMarketListings, dynamicMarketListings),
+      ticketsListed,
       pendingDisputes,
       addPendingDispute: (d) => setPendingDisputes(prev => [d, ...prev]),
       reportedTicketIds,
