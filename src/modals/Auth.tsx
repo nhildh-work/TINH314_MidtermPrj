@@ -1,42 +1,47 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useApp } from "../context";
 import { supabase } from "../lib/supabaseClient";
-import { FaceIDVerification } from "../components/FaceIDVerification";
 import { PolicyModal } from "../components/PolicyModal";
 
-const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
+const GoogleIcon = () => (
+  <svg className="w-5 h-5 shrink-0" viewBox="0 0 48 48">
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+  </svg>
+);
 
-export default function NewListing() {
-  const { nav, dynamicMarketListings, setDynamicMarketListings, setRole, currentUser, currentProfile, setAuthModal, t } = useApp();
+export default function AuthModal() {
+  const { authModal, setAuthModal, role, registerUserDirect, registeredUsers, loginAsUser } = useApp();
+  const [tab, setTab] = useState<"login" | "register">(authModal === "register" ? "register" : "login");
   
-  // State quản lý quét FaceID
-  const [isFaceScanned, setIsFaceScanned] = useState(false);
-  
-  // State quản lý Checkbox & Modal Điều khoản
-  const [agreedTerms, setAgreedTerms] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
-  
-  const [step, setStep] = useState(1);
 
-  const [eventName, setEventName] = useState("");
-  const [tier, setTier] = useState("");
-  const [city, setCity] = useState("");
-  const [venue, setVenue] = useState("");
-  const [eventDate, setEventDate] = useState("");
-
-  const [price, setPrice] = useState("");
-
-  const [ticketFile, setTicketFile] = useState<File | null>(null);
-  const [mapFile, setMapFile] = useState<File | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
-  const step1Valid = eventName.trim() && tier.trim() && city.trim() && eventDate.trim();
+  const [showGoogleChooser, setShowGoogleChooser] = useState(false);
+  const [customGoogleEmail, setCustomGoogleEmail] = useState("");
+  const [customGoogleName, setCustomGoogleName] = useState("");
 
-  const handleSubmit = async () => {
-    if (!currentUser) {
-      setAuthModal("login");
+  if (authModal === "none") return null;
+
+  const handleClose = () => {
+    setAuthModal("none");
+    setShowGoogleChooser(false);
+    setErrorMsg(null);
+  };
+
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!email.trim() || !password) {
+      setErrorMsg("Vui lòng nhập đầy đủ Email và Mật khẩu");
       return;
     }
 
@@ -44,315 +49,399 @@ export default function NewListing() {
       setLoading(true);
       setErrorMsg(null);
 
-      // Thêm vé mới vào bảng tickets trong Supabase
-      const { data, error } = await supabase
-        .from("tickets")
-        .insert({
-          seller_id: currentUser.id,
-          event_name: eventName.trim(),
-          price: Number(price),
-          status: "available",
-          tier: tier.trim(),
-          city: city.trim(),
-          venue: venue.trim() || undefined,
-          event_date: eventDate.trim(),
-          event_image: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
-          section: tier.trim(),
-          seat: "—",
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error("Lỗi khi đăng vé lên Supabase:", error);
-        setErrorMsg(error.message);
-        return;
+      let supabaseSuccess = false;
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (data?.user && !error) {
+          supabaseSuccess = true;
+        }
+      } catch (err) {
+        console.warn("Supabase signIn error:", err);
       }
 
-      // Cập nhật state cục bộ để hiển thị ngay tức thì
-      const newListing = {
-        id: data ? Number(data.id) : Date.now(),
-        eventId: 0,
-        eventTitle: eventName,
-        eventImage: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
-        eventDate: eventDate,
-        city,
-        tier,
-        tierColor: "#A78BFA",
-        section: tier,
-        seat: "—",
-        price: Number(price),
-        officialPrice: Number(price),
-        sellerName: currentProfile?.full_name || currentUser.email?.split("@")[0] || "Tôi",
-        sellerScore: 5.0,
-        sellerReviews: 1,
-        verified: true,
-        minimapUrl: mapFile ? URL.createObjectURL(mapFile) : undefined,
-      };
-      setDynamicMarketListings([newListing, ...dynamicMarketListings]);
-      setDone(true);
+      const existing = (registeredUsers || []).find(
+        u => u.email?.toLowerCase() === email.trim().toLowerCase()
+      );
+
+      if (existing) {
+        loginAsUser(existing);
+        handleClose();
+      } else if (supabaseSuccess) {
+        handleClose();
+      } else {
+        setErrorMsg("Tài khoản chưa được đăng ký hoặc sai mật khẩu. Vui lòng bấm sang tab 'Đăng ký' để tạo tài khoản mới!");
+      }
     } catch (err: any) {
-      setErrorMsg(err.message || "Đăng bán thất bại");
+      setErrorMsg(err?.message || "Đăng nhập thất bại");
     } finally {
       setLoading(false);
     }
   };
 
-  const STEPS = [t.step1Label, t.step2Label, t.step3Label];
+  const handleRegister = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!agreed) {
+      setErrorMsg("Bạn cần đồng ý với Điều khoản & Chính sách giao dịch của SafePass");
+      return;
+    }
+    if (!email.trim() || !password || !fullName.trim()) {
+      setErrorMsg("Vui lòng điền đầy đủ Họ tên, Email và Mật khẩu");
+      return;
+    }
 
-  // Logic Render: Chặn bằng FaceID nếu chưa quét
-  if (!isFaceScanned) {
-      return (
-          <div className="max-w-3xl mx-auto px-5 lg:px-8 py-10 relative">
-              {/* Lớp phủ mờ (blur) form phía sau để cho thấy tính "bắt buộc" */}
-              <div className="absolute inset-0 backdrop-blur-md bg-black/40 z-10 flex items-center justify-center p-4 rounded-xl">
-                 <FaceIDVerification onVerified={() => setIsFaceScanned(true)} />
-              </div>
-              
-              {/* Form mờ ảo bên dưới */}
-              <div className="opacity-30 pointer-events-none">
-                  <div className="flex items-center gap-3 mb-6">
-                    <button className="sp-btn-ghost text-xs px-3 py-1.5">{t.backBtn}</button>
-                    <h1 className="font-display font-800 text-white text-xl">{t.newListingTitle}</h1>
-                  </div>
-                  <div className="sp-card p-6 h-96 flex items-center justify-center">
-                       <p>Nội dung form đã bị khóa...</p>
-                  </div>
-              </div>
-          </div>
-      )
-  }
+    const existing = (registeredUsers || []).find(
+      u => u.email?.toLowerCase() === email.trim().toLowerCase()
+    );
+    if (existing) {
+      setErrorMsg("Email này đã được đăng ký tài khoản. Vui lòng chuyển sang tab 'Đăng nhập'!");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setErrorMsg(null);
+
+      try {
+        await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+              role: role || "buyer",
+              phone: phone.trim(),
+            },
+          },
+        });
+      } catch (err) {
+        console.warn("Supabase signUp error:", err);
+      }
+
+      registerUserDirect({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim() || undefined,
+        role: role || "buyer",
+        provider: "email",
+      });
+
+      handleClose();
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Đăng ký thất bại");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    try {
+      setLoading(true);
+      setErrorMsg(null);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) {
+        setShowGoogleChooser(true);
+      }
+    } catch (err) {
+      setShowGoogleChooser(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCustomGoogleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customGoogleEmail.trim() || !customGoogleName.trim()) {
+      setErrorMsg("Vui lòng nhập họ tên và email Google của bạn");
+      return;
+    }
+    if (tab === "register" && !agreed) {
+      setErrorMsg("Bạn cần đồng ý với Điều khoản & Chính sách giao dịch của SafePass");
+      return;
+    }
+    setLoading(true);
+    try {
+      registerUserDirect({
+        fullName: customGoogleName.trim(),
+        email: customGoogleEmail.trim(),
+        role: role || "buyer",
+        provider: "google",
+      });
+      handleClose();
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <>
-      <div className="max-w-3xl mx-auto px-5 lg:px-8 py-10">
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => nav("seller-dash")} className="sp-btn-ghost text-xs px-3 py-1.5">{t.backBtn}</button>
-          <h1 className="font-display font-800 text-white text-xl">{t.newListingTitle}</h1>
-        </div>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+        onClick={handleClose}
+      >
+        <div
+          className="w-full max-w-md rounded-2xl bg-[#0f0f23] border border-white/10 shadow-2xl overflow-y-auto relative p-6 text-white"
+          style={{ maxHeight: "90vh" }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={handleClose}
+            className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-colors z-10"
+          >
+            ✕
+          </button>
 
-        {/* Stepper */}
-        <div className="flex gap-0 mb-7">
-          {STEPS.map((label, i) => {
-            const n = i + 1;
-            const done_step = step > n;
-            const active = step === n;
-            return (
-              <div key={n} className="flex items-center gap-0 min-w-0">
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-display font-700 shrink-0"
-                    style={{
-                      background: done_step ? "#A3E635" : active ? "linear-gradient(135deg,#7C3AED,#A855F7)" : "#1e1e30",
-                      color: done_step ? "#000" : "#fff",
-                    }}
-                  >
-                    {done_step ? "✓" : n}
-                  </div>
-                  <span className="text-xs font-display font-600 hidden sm:block" style={{ color: active ? "#c4b5fd" : done_step ? "#A3E635" : "#4b5563" }}>
-                    {label}
-                  </span>
-                </div>
-                {i < 2 && <div className="w-6 sm:w-10 h-0.5 mx-1.5 shrink-0" style={{ background: done_step ? "#7C3AED" : "#1e1e30" }} />}
+          {showGoogleChooser ? (
+            <div>
+              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/10">
+                <GoogleIcon />
+                <h3 className="font-display font-700 text-white text-base">Đăng nhập tài khoản Google</h3>
               </div>
-            );
-          })}
-        </div>
 
-        {done ? (
-          <div className="sp-card p-10 text-center">
-            <div className="text-5xl mb-4">🎉</div>
-            <h2 className="font-display font-800 text-white text-xl mb-2">{t.listingSuccess}</h2>
-            <p className="text-sm mb-6" style={{ color: "#9ca3af" }}>{t.listingSuccessSub(eventName)}</p>
-            <div className="flex gap-3 justify-center">
-              <button onClick={() => { setRole("buyer"); nav("marketplace"); }} className="sp-btn-primary px-6 py-2.5 font-display font-700">
-                {t.viewOnMarket}
-              </button>
-              <button onClick={() => nav("seller-dash")} className="sp-btn-ghost px-6 py-2.5 font-display font-700">
-                {t.manageTickets}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="sp-card p-6">
-            {/* STEP 1 */}
-            {step === 1 && (
-              <div className="space-y-4">
-                <h2 className="font-display font-700 text-white text-base mb-4">{t.step1Label}</h2>
+              <p className="text-xs text-gray-300 mb-4">
+                Nhập email Google của bạn để liên kết nhanh vào SafePass:
+              </p>
 
+              <form onSubmit={handleCustomGoogleSubmit} className="space-y-3">
                 <div>
-                  <p className="sp-filter-label mb-1.5">{t.fieldEventName}</p>
-                  <input value={eventName} onChange={e => setEventName(e.target.value)} className="sp-input"
-                    placeholder={t.phEventName} />
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">Họ và tên</label>
+                  <input
+                    type="text"
+                    value={customGoogleName}
+                    onChange={e => setCustomGoogleName(e.target.value)}
+                    placeholder="Ví dụ: Nguyễn Văn A"
+                    className="sp-input w-full"
+                    required
+                  />
                 </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="sp-filter-label mb-1.5">{t.fieldTier}</p>
-                    <input value={tier} onChange={e => setTier(e.target.value)} className="sp-input"
-                      placeholder={t.phTier} />
-                  </div>
-                  <div>
-                    <p className="sp-filter-label mb-1.5">{t.fieldCity}</p>
-                    <input value={city} onChange={e => setCity(e.target.value)} className="sp-input"
-                      placeholder={t.phCity} />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="sp-filter-label mb-1.5">{t.fieldVenue}</p>
-                    <input value={venue} onChange={e => setVenue(e.target.value)} className="sp-input"
-                      placeholder={t.phVenue} />
-                  </div>
-                  <div>
-                    <p className="sp-filter-label mb-1.5">{t.fieldDate}</p>
-                    <input value={eventDate} onChange={e => setEventDate(e.target.value)} className="sp-input"
-                      placeholder={t.phDate} />
-                  </div>
-                </div>
-
-                <button onClick={() => setStep(2)} disabled={!step1Valid}
-                  className="w-full sp-btn-primary py-3 font-display font-700 mt-2">
-                  {t.continueBtn}
-                </button>
-              </div>
-            )}
-
-            {/* STEP 2 */}
-            {step === 2 && (
-              <div className="space-y-4">
-                <h2 className="font-display font-700 text-white text-base mb-4">{t.step2Label}</h2>
-
-                <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "#0a0a14" }}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" style={{ background: "rgba(139,92,246,0.15)" }}>
-                    🎟️
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs truncate" style={{ color: "#6b7280" }}>{eventName}</p>
-                    <p className="font-display font-700 text-sm text-purple-400">{tier} · {city}</p>
-                  </div>
-                </div>
-
                 <div>
-                  <p className="sp-filter-label mb-1.5">{t.fieldSalePrice}</p>
-                  <input type="number" value={price} onChange={e => setPrice(e.target.value)}
-                    className="sp-input text-lg font-display font-700" placeholder={t.phPrice} />
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">Địa chỉ Gmail</label>
+                  <input
+                    type="email"
+                    value={customGoogleEmail}
+                    onChange={e => setCustomGoogleEmail(e.target.value)}
+                    placeholder="user@gmail.com"
+                    className="sp-input w-full"
+                    required
+                  />
                 </div>
-
-                <div className="flex gap-3">
-                  <button onClick={() => setStep(1)} className="flex-1 sp-btn-ghost py-3 font-display font-700">{t.backBtn}</button>
-                  <button onClick={() => setStep(3)} disabled={!price}
-                    className="flex-1 sp-btn-primary py-3 font-display font-700">{t.continueBtn}</button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 3 */}
-            {step === 3 && (
-              <div className="space-y-4">
-                <h2 className="font-display font-700 text-white text-base mb-4">{t.step3Label}</h2>
-
-                <div className="p-4 rounded-xl" style={{ background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.18)" }}>
-                  <p className="text-xs font-700 text-blue-400 mb-1.5">{t.whyHandover}</p>
-                  <p className="text-xs leading-relaxed" style={{ color: "#9ca3af" }}>{t.whyHandoverText}</p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <p className="sp-filter-label mb-2">{t.uploadTicketLabel}</p>
-                    <label className="block cursor-pointer">
-                      <div className="h-40 rounded-xl flex flex-col items-center justify-center transition-all"
-                        style={{ border: ticketFile ? "2px solid rgba(163,230,53,0.5)" : "2px dashed rgba(139,92,246,0.3)", background: "#0a0a14" }}>
-                        {ticketFile ? (
-                          <div className="text-center px-3">
-                            <p className="text-3xl mb-1.5">✅</p>
-                            <p className="text-xs font-display font-700 text-lime-400 line-clamp-2">{ticketFile.name}</p>
-                            <p className="text-xs mt-1" style={{ color: "#6b7280" }}>{t.changeFile}</p>
-                          </div>
-                        ) : (
-                          <>
-                            <span className="text-3xl mb-2">📎</span>
-                            <p className="text-sm font-600 text-white">{t.uploadTicketHint}</p>
-                            <p className="text-xs mt-1" style={{ color: "#4b5563" }}>{t.uploadTicketSub}</p>
-                          </>
-                        )}
-                      </div>
-                      <input type="file" accept=".pdf,.png,.jpg,.jpeg,.zip" className="hidden"
-                        onChange={e => e.target.files?.[0] && setTicketFile(e.target.files[0])} />
+                
+                {tab === "register" && (
+                  <div className="flex items-start gap-3 my-4">
+                    <input 
+                      type="checkbox" 
+                      id="terms-check-google"
+                      checked={agreed}
+                      onChange={(e) => setAgreed(e.target.checked)}
+                      className="mt-1 w-4 h-4 rounded border-gray-600 bg-gray-800 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                    />
+                    <label htmlFor="terms-check-google" className="text-xs text-gray-400 leading-relaxed cursor-pointer">
+                      Tôi đã đọc và đồng ý với{' '}
+                      <button 
+                        type="button" 
+                        onClick={(e) => { e.preventDefault(); setShowTerms(true); }}
+                        className="text-purple-400 hover:text-purple-300 font-bold underline transition-colors"
+                      >
+                        Điều khoản & Chính sách giao dịch
+                      </button>
                     </label>
-                  </div>
-
-                  <div>
-                    <p className="sp-filter-label mb-2">{t.uploadMapLabel}</p>
-                    <label className="block cursor-pointer">
-                      <div className="h-40 rounded-xl flex flex-col items-center justify-center transition-all"
-                        style={{ border: mapFile ? "2px solid rgba(34,211,238,0.5)" : "2px dashed rgba(34,211,238,0.2)", background: "#0a0a14" }}>
-                        {mapFile ? (
-                          <div className="text-center px-3">
-                            <p className="text-3xl mb-1.5">🗺️</p>
-                            <p className="text-xs font-display font-700 text-cyan-400 line-clamp-2">{mapFile.name}</p>
-                            <p className="text-xs mt-1" style={{ color: "#6b7280" }}>{t.changeFile}</p>
-                          </div>
-                        ) : (
-                          <>
-                            <span className="text-3xl mb-2">🗺️</span>
-                            <p className="text-sm font-600 text-white">{t.uploadMapHint}</p>
-                            <p className="text-xs mt-1" style={{ color: "#4b5563" }}>{t.uploadMapSub}</p>
-                          </>
-                        )}
-                      </div>
-                      <input type="file" accept=".png,.jpg,.jpeg" className="hidden"
-                        onChange={e => e.target.files?.[0] && setMapFile(e.target.files[0])} />
-                    </label>
-                  </div>
-                </div>
-
-                {errorMsg && (
-                  <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300">
-                    ⚠️ {errorMsg}
                   </div>
                 )}
 
-                {/* Phần Checkbox Điều Khoản */}
-                <div className="flex items-start gap-3 my-5">
-                  <input 
-                    type="checkbox" 
-                    id="terms-check-seller"
-                    checked={agreedTerms}
-                    onChange={(e) => setAgreedTerms(e.target.checked)}
-                    className="mt-1 w-4 h-4 rounded border-gray-600 bg-[#13132a] text-purple-600 focus:ring-purple-500 cursor-pointer shrink-0"
-                  />
-                  <label htmlFor="terms-check-seller" className="text-xs text-gray-400 leading-relaxed cursor-pointer">
-                    Tôi đã đọc và đồng ý với{' '}
-                    <button 
-                      type="button" 
-                      onClick={(e) => { e.preventDefault(); setShowTerms(true); }}
-                      className="text-purple-400 hover:text-purple-300 font-bold underline transition-colors"
-                    >
-                      Điều khoản & Chính sách giao dịch
-                    </button>
-                    {' '}của nền tảng. Tôi chấp nhận chế tài tịch thu 25% tiền cọc và khóa tài khoản vĩnh viễn nếu vi phạm gian lận.
-                  </label>
-                </div>
+                <button
+                  type="submit"
+                  disabled={loading || (tab === "register" && !agreed)}
+                  className="w-full py-2.5 rounded-xl font-display font-700 text-white text-sm bg-purple-600 hover:bg-purple-700 transition-colors mt-2 disabled:opacity-50"
+                >
+                  {loading ? "Đang xử lý..." : "Xác nhận đăng nhập Google"}
+                </button>
+              </form>
 
-                <div className="flex gap-3">
-                  <button onClick={() => setStep(2)} className="flex-1 sp-btn-ghost py-3 font-display font-700">{t.backBtn}</button>
-                  <button
-                    onClick={handleSubmit}
-                    disabled={!ticketFile || !agreedTerms || loading}
-                    className="flex-1 sp-btn-primary py-3 font-display font-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loading ? "Đang lưu lên hệ thống..." : t.submitListing}
-                  </button>
+              <button
+                type="button"
+                onClick={() => setShowGoogleChooser(false)}
+                className="w-full mt-4 text-center text-xs text-gray-400 hover:text-gray-300"
+              >
+                ← Quay lại
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-xl">
+                  🛡️
+                </div>
+                <div>
+                  <p className="font-display font-800 text-white text-xl leading-none">SafePass</p>
+                  <p className="text-xs text-gray-400 mt-1">Sàn nhượng vé sự kiện an toàn</p>
                 </div>
               </div>
-            )}
-          </div>
-        )}
+
+              {errorMsg && (
+                <div className="p-3 mb-4 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300 flex items-start gap-2">
+                  <span>⚠️</span>
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+
+              <div className="flex gap-1 p-1 rounded-xl mb-5 bg-[#070716] border border-white/5">
+                <button
+                  type="button"
+                  onClick={() => { setTab("login"); setErrorMsg(null); }}
+                  className={`flex-1 py-2 rounded-lg text-sm font-display font-700 transition-all ${
+                    tab === "login" ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Đăng nhập
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setTab("register"); setErrorMsg(null); }}
+                  className={`flex-1 py-2 rounded-lg text-sm font-display font-700 transition-all ${
+                    tab === "register" ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Đăng ký
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGoogleAuth}
+                className="w-full flex items-center justify-center gap-3 py-2.5 rounded-xl font-semibold text-sm bg-white hover:bg-gray-100 text-gray-900 transition-all mb-4 shadow cursor-pointer"
+              >
+                <GoogleIcon />
+                <span>{tab === "login" ? "Tiếp tục với Google" : "Đăng ký nhanh với Google"}</span>
+              </button>
+
+              <div className="relative my-4 text-center">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-white/10" />
+                </div>
+                <span className="relative px-3 text-xs bg-[#0f0f23] text-gray-500">hoặc dùng email</span>
+              </div>
+
+              {tab === "login" ? (
+                <form onSubmit={handleLogin} className="space-y-3">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Email</label>
+                    <input
+                      type="email"
+                      placeholder="email@example.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      required
+                      className="sp-input w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Mật khẩu</label>
+                    <input
+                      type="password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      required
+                      className="sp-input w-full"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full sp-btn-primary py-3 font-display font-700 mt-2 disabled:opacity-50"
+                  >
+                    {loading ? "Đang kiểm tra tài khoản..." : "Đăng nhập ngay"}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleRegister} className="space-y-3">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Họ và tên của bạn</label>
+                    <input
+                      type="text"
+                      placeholder="Nguyễn Văn A"
+                      value={fullName}
+                      onChange={e => setFullName(e.target.value)}
+                      required
+                      className="sp-input w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Email đăng ký</label>
+                    <input
+                      type="email"
+                      placeholder="email@example.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      required
+                      className="sp-input w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Số điện thoại (nhận vé)</label>
+                    <input
+                      type="tel"
+                      placeholder="09xx xxx xxx"
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      className="sp-input w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Mật khẩu</label>
+                    <input
+                      type="password"
+                      placeholder="Ít nhất 6 ký tự"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      required
+                      className="sp-input w-full"
+                    />
+                  </div>
+
+                  <div className="flex items-start gap-3 my-5 pt-2">
+                    <input 
+                      type="checkbox" 
+                      id="terms-check"
+                      checked={agreed}
+                      onChange={(e) => setAgreed(e.target.checked)}
+                      className="mt-1 w-4 h-4 rounded border-gray-600 bg-[#13132a] text-purple-600 focus:ring-purple-500 cursor-pointer shrink-0"
+                    />
+                    <label htmlFor="terms-check" className="text-xs text-gray-400 leading-relaxed cursor-pointer">
+                      Tôi đã đọc và đồng ý với{' '}
+                      <button 
+                        type="button" 
+                        onClick={(e) => { e.preventDefault(); setShowTerms(true); }}
+                        className="text-purple-400 hover:text-purple-300 font-bold underline transition-colors"
+                      >
+                        Điều khoản & Chính sách giao dịch
+                      </button>
+                      {' '}của nền tảng.
+                    </label>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={!agreed || loading}
+                    className="w-full sp-btn-primary py-3 font-display font-700 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? "Đang tạo tài khoản..." : "Tạo tài khoản SafePass"}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       
-      {/* Gọi Component Policy Modal ở đây */}
       <PolicyModal isOpen={showTerms} onClose={() => setShowTerms(false)} />
     </>
   );
