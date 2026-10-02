@@ -86,6 +86,28 @@ export default function CheckoutModal() {
     }
 
     initTransaction();
+
+    // Tự động kiểm tra trạng thái thanh toán từ SePay Webhook mỗi 2.5 giây
+    const pollTimer = setInterval(async () => {
+      if (!code) return;
+      try {
+        const { data: tx } = await supabase
+          .from("transactions")
+          .select("status")
+          .eq("reference_code", code)
+          .maybeSingle();
+
+        if (tx && tx.status === "paid") {
+          completePurchase();
+        }
+      } catch (err) {
+        // im lặng nếu lỗi mạng
+      }
+    }, 2500);
+
+    return () => {
+      clearInterval(pollTimer);
+    };
   }, [checkoutTicket?.id, activeUserId]);
 
   if (!checkoutTicket) return null;
@@ -199,6 +221,10 @@ export default function CheckoutModal() {
                 <p className="flex justify-between">
                   <span className="text-gray-400">Sự kiện:</span>
                   <strong>{checkoutTicket.eventTitle}</strong>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-gray-400">{isDepositTx ? "Tiền cọc ký quỹ (25%):" : "Tổng tiền thanh toán:"}</span>
+                  <strong className="font-display font-800 text-emerald-400">{fmt(total)}</strong>
                 </p>
                 <p className="flex justify-between">
                   <span className="text-gray-400">Trạng thái:</span>
