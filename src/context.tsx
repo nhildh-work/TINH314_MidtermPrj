@@ -34,6 +34,7 @@ interface AppCtx {
   t: T;
   dynamicMarketListings: TicketListing[];
   setDynamicMarketListings: (listings: TicketListing[]) => void;
+  ticketsListed: () => TicketListing[];
   pendingDisputes: PendingDispute[];
   addPendingDispute: (d: PendingDispute) => void;
   reportedTicketIds: number[];
@@ -203,7 +204,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (prof.role === "seller") {
           setRole("seller");
         }
-        // Also ensure this profile is in registeredUsers
         setRegisteredUsers(prev => {
           const idx = prev.findIndex(u => u.id === prof.id || u.email === prof.email);
           if (idx >= 0) {
@@ -214,7 +214,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return [prof, ...prev];
         });
       } else {
-        // User logged in via Google OAuth but doesn't have a row in public.profiles yet
         const metaName =
           user.user_metadata?.full_name ||
           user.user_metadata?.name ||
@@ -244,7 +243,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return prev;
         });
 
-        // Insert into Supabase table
         try {
           await supabase.from("profiles").upsert(newProf);
         } catch (dbErr) {
@@ -263,7 +261,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // 1. Get initial Supabase session
     supabase.auth.getSession().then(({ data: { session } }) => {
       const user = session?.user ?? null;
       if (user) {
@@ -272,7 +269,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // 2. Listen to Auth changes (including OAuth redirects)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user ?? null;
       if (user) {
@@ -354,7 +350,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRegisteredUsers(prev => [newRecord, ...prev]);
     loginAsUser(newRecord);
 
-    // Best-effort push to Supabase profiles
     supabase
       .from("profiles")
       .insert({
@@ -398,14 +393,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lang, setLang,
       t: translations[lang],
       dynamicMarketListings, setDynamicMarketListings,
+      ticketsListed: () => dynamicMarketListings,
       pendingDisputes,
       addPendingDispute: (d) => setPendingDisputes(prev => [d, ...prev]),
       reportedTicketIds,
       addReportedTicket: (id) => setReportedTicketIds(prev => [...prev, id]),
-      // Purchased tickets
       purchasedTickets,
       addPurchasedTicket,
-      // User Management
       registeredUsers,
       showUsersModal,
       setShowUsersModal,
