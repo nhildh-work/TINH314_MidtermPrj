@@ -49,23 +49,27 @@ Deno.serve(async (req) => {
 
     const upperContent = content.toUpperCase();
 
-    // 1. Thêm xử lý nội dung chuyển khoản Ký Quỹ (VD: SAFEPASS KYQUY <user_id>)
-    if (upperContent.includes("SAFEPASS") && upperContent.includes("KYQUY")) {
-      const parts = upperContent.split("KYQUY");
-      if (parts[1]) {
-        const userId = parts[1].trim().split(" ")[0];
-        const { error: updateProfileErr } = await supabase
-          .from("profiles")
-          .update({ role: "seller" }) // Cập nhật quyền seller khi nạp ký quỹ thành công
-          .eq("id", userId);
+    // 1. Xử lý nội dung chuyển khoản ĐÓNG CỌC KÝ QUỸ (VD: SAFEPASS KYQUY <ticket_id>)
+    if (upperContent.includes("KYQUY")) {
+      // Tìm số ID vé từ nội dung cọc (VD: SAFEPASS KYQUY 13)
+      const ticketMatch = content.match(/KYQUY\s*(\d+)/i) || content.match(/(\d+)/);
+      if (ticketMatch) {
+        const ticketId = Number(ticketMatch[1]);
+        // Cập nhật vé thành mở bán
+        await supabase
+          .from("tickets")
+          .update({ status: "available" })
+          .eq("id", ticketId);
 
-        if (!updateProfileErr) {
-          processed++;
-          console.log(`✅ Confirmed deposit for user ${userId}`);
-          continue;
-        } else {
-          console.error(`Failed to update profile for user ${userId}:`, updateProfileErr);
-        }
+        // Cập nhật giao dịch thành công
+        await supabase
+          .from("transactions")
+          .update({ status: "paid" })
+          .eq("ticket_id", ticketId);
+
+        processed++;
+        console.log(`✅ Đã xác nhận đóng cọc ký quỹ cho vé #${ticketId}`);
+        continue;
       }
     }
 

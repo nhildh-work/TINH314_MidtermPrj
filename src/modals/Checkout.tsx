@@ -5,7 +5,10 @@ import { PolicyModal } from "../components/PolicyModal";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
-function generateRefCode(ticketId: string | number) {
+function generateRefCode(ticketId: string | number, isDeposit: boolean = false) {
+  if (isDeposit) {
+    return `SAFEPASS KYQUY ${ticketId}`;
+  }
   const randomSuffix = Math.floor(1000 + Math.random() * 9000);
   return `SP${ticketId}${randomSuffix}`;
 }
@@ -14,8 +17,12 @@ export default function CheckoutModal() {
   const { checkoutTicket, closeCheckout, addToCart, currentUser, currentProfile, addPurchasedTicket, nav } = useApp();
   const [showTerms, setShowTerms] = useState(false);
   const [done, setDone] = useState(false);
+
+  // Biến cờ tuyệt đối để phân biệt Luồng Người Bán Đóng Cọc vs Người Mua
+  const isDepositTx = (checkoutTicket as any)?.isDeposit === true || checkoutTicket?.tier?.includes("Cọc");
+
   const [refCode, setRefCode] = useState<string>(() =>
-    checkoutTicket ? generateRefCode(checkoutTicket.id) : ""
+    checkoutTicket ? generateRefCode(checkoutTicket.id, isDepositTx) : ""
   );
   const [qrReady, setQrReady] = useState(true);
   const [paymentStatus, setPaymentStatus] = useState<"pending" | "paid">("pending");
@@ -23,9 +30,6 @@ export default function CheckoutModal() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedAcc, setCopiedAcc] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState(false);
-
-  // Biến cờ tuyệt đối để phân biệt Luồng Người Bán Đóng Cọc vs Người Mua
-  const isDepositTx = (checkoutTicket as any)?.isDeposit === true || checkoutTicket?.tier?.includes("Cọc");
 
   const activeUserId = currentUser?.id || currentProfile?.id || "anonymous-user";
 
@@ -49,7 +53,7 @@ export default function CheckoutModal() {
 
     let code = refCode;
     if (!code) {
-      code = generateRefCode(checkoutTicket.id);
+      code = generateRefCode(checkoutTicket.id, isDepositTx);
       setRefCode(code);
     }
 

@@ -139,6 +139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
+          // Lọc bỏ các vé cọc hoặc vé mẫu không hợp lệ
           const cleaned = parsed.filter((t: any) => !t.isDeposit && !t.tier?.includes("Cọc") && t.id !== 12);
           localStorage.setItem("safepass_purchased_tickets", JSON.stringify(cleaned));
           return cleaned;
@@ -151,6 +152,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   const addPurchasedTicket = (ticket: MyTicket) => {
+    // Tuyệt đối không thêm vé cọc ký quỹ vào danh sách vé đã mua
     if ((ticket as any).isDeposit || ticket.tier?.includes("Cọc")) return;
 
     setPurchasedTickets(prev => {
@@ -164,6 +166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // 🛠️ TỰ ĐỘNG ĐỒNG BỘ TRẠNG THÁI KYC TỪ DATABASE VÀ PROFILE HIỆN TẠI
   useEffect(() => {
     if (currentProfile) {
       const dbKycStatus = (currentProfile as any).kyc_status;
@@ -396,6 +399,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Vừa hoạt động như hàm, vừa hoạt động như mảng 100% an toàn
   const ticketsListFn: any = () => dynamicMarketListings;
   ticketsListFn.map = (fn: any) => dynamicMarketListings.map(fn);
   ticketsListFn.filter = (fn: any) => dynamicMarketListings.filter(fn);
@@ -409,7 +413,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{
       view, nav, role, setRole,
-      cartCount, addToCart: () => setCartCount(c => c + 1),
+      cartCount,
+      addToCart: () => setCartCount(c => c + 1),
       selectedEvent, setSelectedEvent,
       checkoutTicket,
       openCheckout: (t) => setCheckoutTicket(t),

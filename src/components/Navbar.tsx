@@ -52,7 +52,11 @@ export default function Navbar() {
         </div>
 
         {/* Cart */}
-        <button className="sp-cart-btn" onClick={() => { if (isLoggedIn) nav("my-tickets"); else setAuthModal("login"); }}>
+        <button
+          className="sp-cart-btn"
+          onClick={() => { if (isLoggedIn) nav("my-tickets"); else setAuthModal("login"); }}
+          title="Giỏ hàng / Vé của tôi"
+        >
           <span>🛍️</span>
           {cartCount > 0 && <span className="sp-cart-badge">{cartCount}</span>}
         </button>
