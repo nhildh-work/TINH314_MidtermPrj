@@ -42,8 +42,8 @@ export default function NewListing() {
       return;
     }
 
-    if (pricePerTicket < 10000) {
-      setErrorMsg("Giá bán vé tối thiểu là 10.000 VND!");
+    if (pricePerTicket <= 0) {
+      setErrorMsg("Giá bán vé phải lớn hơn 0 VND!");
       return;
     }
 
@@ -68,7 +68,6 @@ export default function NewListing() {
         city: city.trim(),
         tier: quantity > 1 ? `${fullTier} (Vé #${idx + 1})` : fullTier,
         price: Number(pricePerTicket),
-        qr_code_url: qrFile ? qrFile.name : null,
         status: "available",
         created_at: new Date().toISOString(),
       }));
@@ -258,8 +257,8 @@ export default function NewListing() {
             <input
               type="number"
               value={pricePerTicket}
-              step={10000}
-              min={10000}
+              step={1000}
+              min={1}
               onChange={e => setPricePerTicket(Number(e.target.value))}
               className="sp-input font-display font-800 text-emerald-400 text-base"
               required
