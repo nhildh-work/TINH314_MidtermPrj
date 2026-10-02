@@ -173,21 +173,45 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
 
 // POPUP CHI TIẾT VÉ & NÚT ĐÓNG CỌC MỞ BÁN
 function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onClose: () => void; onDeleted: (id: number) => void }) {
-  const { openCheckout } = useApp();
+  const { openCheckout, currentProfile, refreshProfile } = useApp();
   const cfg = STATUS_CFG[listing.status as keyof typeof STATUS_CFG] || STATUS_CFG.available;
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const depositAmount = Math.round(listing.price * 0.25);
+  const cancellationFee = Math.round(depositAmount * 0.05); // Phí quản lý & hủy niêm yết 5%
+  const refundAmount = depositAmount - cancellationFee; // Hoàn 95% cọc
 
   const handleDeleteListing = async () => {
-    if (!window.confirm("Bạn có chắc chắn muốn hủy niêm yết vé này không?")) return;
+    if (listing.status === "locked" || listing.status === "disputed") {
+      alert("🔴 Vé đang trong quá trình giao dịch với người mua hoặc tranh chấp, tuyệt đối KHÔNG ĐƯỢC HỦY!");
+      return;
+    }
+
+    const isAvailable = listing.status === "available";
+    const confirmMsg = isAvailable
+      ? `XÁC NHẬN HỦY NIÊM YẾT VÉ?\n\n• Giá vé niêm yết: ${fmt(listing.price)}\n• Tiền cọc đã đóng (25%): ${fmt(depositAmount)}\n• Phí dịch vụ hủy hệ thống (5%): -${fmt(cancellationFee)}\n• Số tiền cọc hoàn vào Số dư tài khoản: +${fmt(refundAmount)}\n\nBạn có chắc chắn muốn hủy niêm yết vé này không?`
+      : "Bạn có chắc chắn muốn hủy đăng bán vé này không?";
+
+    if (!window.confirm(confirmMsg)) return;
+
     setLoading(true);
     setErrorMsg(null);
     try {
       await supabase.from("transactions").delete().eq("ticket_id", listing.id);
       const { error } = await supabase.from("tickets").delete().eq("id", listing.id);
       if (error) throw error;
+
+      // Cộng hoàn 95% cọc vào Số dư tài khoản người bán nếu vé đã đóng cọc
+      if (isAvailable && refundAmount > 0 && currentProfile?.id) {
+        const currentBal = Number((currentProfile as any).balance || 0);
+        await supabase
+          .from("profiles")
+          .update({ balance: currentBal + refundAmount })
+          .eq("id", currentProfile.id);
+
+        await refreshProfile();
+      }
 
       onDeleted(listing.id);
       onClose();
