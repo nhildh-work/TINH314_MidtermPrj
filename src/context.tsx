@@ -369,22 +369,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Bulletproof proxy supporting both function call and array operations
-  const ticketsListed = new Proxy(
-    () => dynamicMarketListings,
-    {
-      get(target, prop, receiver) {
-        if (prop in Array.prototype || typeof prop === 'symbol' || !isNaN(Number(prop))) {
-          return Reflect.get(dynamicMarketListings, prop, dynamicMarketListings);
-        }
-        const val = Reflect.get(target, prop, receiver);
-        return typeof val === 'function' ? val.bind(target) : val;
-      },
-      apply() {
-        return dynamicMarketListings;
-      },
-    }
-  );
+  // Vừa hoạt động như hàm, vừa hoạt động như mảng 100% an toàn
+  const ticketsListFn: any = () => dynamicMarketListings;
+  ticketsListFn.map = (fn: any) => dynamicMarketListings.map(fn);
+  ticketsListFn.filter = (fn: any) => dynamicMarketListings.filter(fn);
+  ticketsListFn.find = (fn: any) => dynamicMarketListings.find(fn);
+  ticketsListFn.forEach = (fn: any) => dynamicMarketListings.forEach(fn);
+  ticketsListFn.reduce = (fn: any, init: any) => dynamicMarketListings.reduce(fn, init);
+  Object.defineProperty(ticketsListFn, 'length', {
+    get: () => dynamicMarketListings.length,
+  });
 
   return (
     <Ctx.Provider value={{
@@ -404,7 +398,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lang, setLang,
       t: translations[lang],
       dynamicMarketListings, setDynamicMarketListings,
-      ticketsListed,
+      ticketsListed: ticketsListFn,
       pendingDisputes,
       addPendingDispute: (d) => setPendingDisputes(prev => [d, ...prev]),
       reportedTicketIds,
