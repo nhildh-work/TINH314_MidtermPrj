@@ -137,7 +137,6 @@ export default function CheckoutModal() {
     setPaymentStatus("paid");
 
     try {
-      // Cập nhật trạng thái transaction trong Database
       if (refCode) {
         await supabase
           .from("transactions")
@@ -145,12 +144,20 @@ export default function CheckoutModal() {
           .eq("reference_code", refCode);
       }
 
-      // Cập nhật trạng thái vé
       if (checkoutTicket && checkoutTicket.id) {
-        await supabase
-          .from("tickets")
-          .update({ status: "sold" })
-          .eq("id", checkoutTicket.id);
+        // NẾU LÀ GIAO DỊCH ĐÓNG CỌC CỦA NGƯỜI BÁN -> ĐỔI THÀNH AVAILABLE (ĐANG BÁN)
+        if (checkoutTicket.isDeposit) {
+          await supabase
+            .from("tickets")
+            .update({ status: "available" })
+            .eq("id", checkoutTicket.id);
+        } else {
+          // NẾU LÀ NGƯỜI MUA MUA VÉ -> ĐỔI THÀNH SOLD
+          await supabase
+            .from("tickets")
+            .update({ status: "sold" })
+            .eq("id", checkoutTicket.id);
+        }
       }
     } catch (e) {
       console.warn("Lỗi cập nhật DB:", e);
@@ -168,7 +175,7 @@ export default function CheckoutModal() {
       status: "paid", 
     });
 
-    setDone(true); // BẬT POPUP THÀNH CÔNG
+    setDone(true);
   };
 
   // Nút kiểm tra / xác nhận thanh toán thủ công khi test

@@ -5,11 +5,13 @@ import { supabase } from "../lib/supabaseClient";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
+// BẢNG CẤU HÌNH TRẠNG THÁI CHUẨN
 const STATUS_CFG = {
-  available: { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
-  locked:    { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
-  completed: { label: "ĐÃ BÁN THÀNH CÔNG", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
-  disputed:  { label: "🚨 TRANH CHẤP (ĐÃ KHÓA TIỀN VÉ NÀY)", color: "#F87171", bg: "rgba(248,113,113,0.15)" },
+  pending_deposit: { label: "⏳ CHỜ ĐÓNG CỌC", color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
+  available:       { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
+  locked:          { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
+  completed:       { label: "ĐÃ BÁN THÀNH CÔNG", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
+  disputed:        { label: "🚨 TRANH CHẤP (ĐÃ KHÓA TIỀN VÉ NÀY)", color: "#F87171", bg: "rgba(248,113,113,0.15)" },
 } as const;
 
 function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
@@ -168,13 +170,17 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
   );
 }
 
+// POPUP CHI TIẾT VÉ & BỔ SUNG NÚT ĐÓNG CỌC
 function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onClose: () => void; onDeleted: (id: number) => void }) {
-  const cfg = STATUS_CFG[listing.status] || STATUS_CFG.available;
+  const { setCheckoutTicket } = useApp();
+  const cfg = STATUS_CFG[listing.status as keyof typeof STATUS_CFG] || STATUS_CFG.available;
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const depositAmount = Math.round(listing.price * 0.25);
+
   const handleDeleteListing = async () => {
-    if (!window.confirm("Bạn có chắc chắn muốn hủy và xóa niêm yết vé này không?")) return;
+    if (!window.confirm("Bạn có chắc chắn muốn hủy niêm yết vé này không?")) return;
     setLoading(true);
     setErrorMsg(null);
     try {
@@ -190,26 +196,39 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
     }
   };
 
+  const handlePayDepositNow = () => {
+    onClose();
+    // Mở Checkout Modal đóng cọc 25%
+    setCheckoutTicket({
+      id: listing.id,
+      eventTitle: listing.eventTitle,
+      price: depositAmount, // Đặt số tiền thanh toán là đúng 25% cọc
+      tier: `Cọc ký quỹ (25%): ${listing.tier}`,
+      eventDate: listing.date,
+      isDeposit: true, // Đánh dấu là giao dịch đóng cọc
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="sp-card p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-5">
+      <div className="sp-card p-6 max-w-sm w-full space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
           <h2 className="font-display font-700 text-white text-sm leading-snug pr-4">{listing.eventTitle}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
 
-        <div className="space-y-3 mb-5">
+        <div className="space-y-3 text-xs">
           <div className="flex justify-between items-center">
             <span className="sp-filter-label">Hạng vé</span>
-            <span className="font-display font-700 text-sm text-purple-400">{listing.tier}</span>
+            <span className="font-display font-700 text-purple-400">{listing.tier}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="sp-filter-label">Thời gian</span>
-            <span className="font-display font-700 text-sm text-gray-300">{listing.date}</span>
+            <span className="font-display font-700 text-gray-300">{listing.date}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="sp-filter-label">Giá niêm yết</span>
-            <span className="font-display font-700 text-sm text-white">{fmt(listing.price)}</span>
+            <span className="font-display font-700 text-white">{fmt(listing.price)}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="sp-filter-label">Trạng thái</span>
@@ -220,16 +239,36 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
         </div>
 
         {errorMsg && (
-          <div className="mb-4 p-2.5 text-xs bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg">
+          <div className="p-2.5 text-xs bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg">
             ⚠ {errorMsg}
           </div>
         )}
 
-        {listing.status === "available" ? (
+        {/* NÚT THANH TOÁN CỌC DÀNH RIÊNG CHO VÉ PENDING_DEPOSIT */}
+        {listing.status === "pending_deposit" ? (
+          <div className="space-y-2 pt-2 border-t border-white/10">
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
+              ⚠️ Vé này chưa hoàn tất đóng cọc ký quỹ (25%). Vui lòng chuyển khoản cọc để chính thức đăng bán vé lên hệ thống!
+            </div>
+            <button
+              onClick={handlePayDepositNow}
+              className="w-full py-3.5 rounded-xl font-display font-800 text-xs cursor-pointer shadow-lg bg-amber-500 hover:bg-amber-400 text-black transition-all"
+            >
+              ⚡ Thanh toán cọc ngay ({fmt(depositAmount)}) →
+            </button>
+            <button
+              onClick={handleDeleteListing}
+              disabled={loading}
+              className="w-full py-2 rounded-xl text-xs text-red-400 hover:text-red-300 transition-all cursor-pointer"
+            >
+              Hủy đăng vé này
+            </button>
+          </div>
+        ) : listing.status === "available" ? (
           <button
             onClick={handleDeleteListing}
             disabled={loading}
-            className="w-full py-3 rounded-xl font-display font-700 text-sm cursor-pointer disabled:opacity-50"
+            className="w-full py-3 rounded-xl font-display font-700 text-xs transition-all cursor-pointer disabled:opacity-50"
             style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)", color: "#F87171" }}
           >
             {loading ? "Đang xử lý..." : "Hủy và xóa niêm yết vé"}
@@ -285,7 +324,8 @@ export default function SellerDash() {
             eventTitle: t.event_name,
             tier: t.tier || "Standard",
             price: Number(t.price),
-            status: t.status === "disputed" ? "disputed" : t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
+            // Đọc chính xác trạng thái pending_deposit
+            status: t.status === "pending_deposit" ? "pending_deposit" : t.status === "disputed" ? "disputed" : t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
             date: t.event_date || "Sắp diễn ra",
           }));
           setSellerTickets(mapped);
@@ -327,32 +367,20 @@ export default function SellerDash() {
 
     setLoading(true);
     try {
-      const holderName = accountHolder.trim().toUpperCase() || (currentProfile?.full_name || "").toUpperCase();
-
-      // 1. Lưu vào profiles table
       if (currentProfile?.id) {
-        const { error: profileErr } = await supabase.from("profiles").update({
+        const holderName = accountHolder.trim().toUpperCase() || (currentProfile.full_name || "").toUpperCase();
+        
+        const { error } = await supabase.from("profiles").update({
           bank_name: bankName,
           bank_account: accountNumber.trim(),
           bank_holder: holderName,
         }).eq("id", currentProfile.id);
 
-        if (profileErr) {
-          console.warn("Lỗi lưu profiles, chuyển sang lưu auth metadata:", profileErr.message);
-        }
+        if (error) throw error;
+
+        await refreshProfile();
+        setSuccessMsg("✓ Đã lưu và đồng bộ tài khoản ngân hàng thành công!");
       }
-
-      // 2. Lưu dự phòng vào Auth User Metadata (luôn thành công 100%)
-      await supabase.auth.updateUser({
-        data: {
-          bank_name: bankName,
-          bank_account: accountNumber.trim(),
-          bank_holder: holderName,
-        }
-      });
-
-      await refreshProfile();
-      setSuccessMsg("✓ Đã lưu và đồng bộ tài khoản ngân hàng thành công!");
     } catch (err: any) {
       setErrorMsg(err.message || "Lỗi khi lưu thông tin ngân hàng.");
     } finally {
@@ -385,6 +413,7 @@ export default function SellerDash() {
     );
   }
 
+  // CHỈ ĐẾM VÉ 'available' LÀ ĐANG MỞ BÁN
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
   const soldListings = allSellerListings.filter(l => l.status === "completed");
   const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
@@ -568,7 +597,7 @@ export default function SellerDash() {
               </thead>
               <tbody>
                 {allSellerListings.map(listing => {
-                  const cfg = STATUS_CFG[listing.status] || STATUS_CFG.available;
+                  const cfg = STATUS_CFG[listing.status as keyof typeof STATUS_CFG] || STATUS_CFG.available;
                   return (
                     <tr
                       key={listing.id}
