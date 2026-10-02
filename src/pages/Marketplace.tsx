@@ -25,8 +25,9 @@ function MinimapModal({ url, onClose }: { url: string; onClose: () => void }) {
   );
 }
 
-function TicketCard({ ticket }: { ticket: TicketListing }) {
-  const { openCheckout, setSelectedEvent, nav, isLoggedIn, setAuthModal, t, lang } = useApp();
+// Modal xem chi tiết thông tin vé trước khi quyết định mua
+function TicketDetailModal({ ticket, onClose }: { ticket: TicketListing; onClose: () => void }) {
+  const { openCheckout, isLoggedIn, setAuthModal } = useApp();
   const [showMap, setShowMap] = useState(false);
 
   return (
@@ -34,7 +35,91 @@ function TicketCard({ ticket }: { ticket: TicketListing }) {
       {showMap && ticket.minimapUrl && (
         <MinimapModal url={ticket.minimapUrl} onClose={() => setShowMap(false)} />
       )}
-      <div className="sp-card sp-card-hover flex flex-col overflow-hidden">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }}
+        onClick={onClose}
+      >
+        <div className="sp-card p-6 max-w-lg w-full space-y-5" onClick={e => e.stopPropagation()}>
+          <div className="flex items-start justify-between pb-3 border-b border-white/5">
+            <div>
+              <span className="text-xs font-display font-700 px-2 py-0.5 rounded-full inline-block mb-1" style={{ color: ticket.tierColor, background: ticket.tierColor + "28", border: `1px solid ${ticket.tierColor}50` }}>
+                {ticket.tier}
+              </span>
+              <h2 className="font-display font-800 text-white text-base leading-snug">{ticket.eventTitle}</h2>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">✕</button>
+          </div>
+
+          <div className="relative h-40 rounded-xl overflow-hidden">
+            <img src={ticket.eventImage} alt={ticket.eventTitle} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#070711] via-transparent to-transparent" />
+            <div className="absolute bottom-3 left-3 text-xs text-gray-300">
+              📅 {ticket.eventDate} · 📍 {ticket.city}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5">
+              <span className="text-gray-400 block mb-1">Khu vực / Hàng ghế</span>
+              <strong className="text-white text-sm">{ticket.section} · {ticket.seat}</strong>
+            </div>
+            <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5">
+              <span className="text-gray-400 block mb-1">Người bán chính chủ</span>
+              <strong className="text-emerald-400 text-sm">✓ {ticket.sellerName}</strong>
+            </div>
+          </div>
+
+          {ticket.minimapUrl && (
+            <button
+              onClick={() => setShowMap(true)}
+              className="w-full py-2.5 rounded-xl text-xs font-display font-700 text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 transition-all cursor-pointer"
+            >
+              🗺 Xem sơ đồ vị trí ghế chi tiết
+            </button>
+          )}
+
+          <div className="flex items-center justify-between pt-3 border-t border-white/5">
+            <div>
+              <p className="text-xs text-gray-400">Giá vé niêm yết</p>
+              <p className="font-display font-900 text-white text-xl">{fmt(ticket.price)}</p>
+            </div>
+            <button
+              onClick={() => {
+                onClose();
+                if (!isLoggedIn) { setAuthModal("login"); return; }
+                openCheckout(ticket);
+              }}
+              className="sp-btn-primary px-6 py-3 text-sm font-display font-700 cursor-pointer"
+            >
+              Mua ngay vé này
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function TicketCard({ ticket }: { ticket: TicketListing }) {
+  const { openCheckout, isLoggedIn, setAuthModal, t, lang } = useApp();
+  const [showMap, setShowMap] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+
+  return (
+    <>
+      {showMap && ticket.minimapUrl && (
+        <MinimapModal url={ticket.minimapUrl} onClose={() => setShowMap(false)} />
+      )}
+      {showDetail && (
+        <TicketDetailModal ticket={ticket} onClose={() => setShowDetail(false)} />
+      )}
+
+      {/* Bấm vào card vé sẽ bật bảng chi tiết */}
+      <div 
+        onClick={() => setShowDetail(true)}
+        className="sp-card sp-card-hover flex flex-col overflow-hidden cursor-pointer"
+      >
         {/* Image */}
         <div className="relative h-44 overflow-hidden" style={{ borderRadius: "15px 15px 0 0" }}>
           <img
@@ -68,17 +153,9 @@ function TicketCard({ ticket }: { ticket: TicketListing }) {
         </div>
 
         <div className="p-4 flex flex-col flex-1">
-          <button
-            onClick={() => {
-              const ev = EVENTS.find(e => e.id === ticket.eventId);
-              if (ev) { setSelectedEvent(ev); nav("event-detail"); }
-            }}
-            className="text-left mb-0.5"
-          >
-            <h3 className="font-display font-700 text-white text-sm leading-snug line-clamp-2 hover:text-purple-300 transition-colors">
-              {ticket.eventTitle}
-            </h3>
-          </button>
+          <h3 className="font-display font-700 text-white text-sm leading-snug line-clamp-2 mb-0.5">
+            {ticket.eventTitle}
+          </h3>
           <p className="text-xs mb-3" style={{ color: "#6b7280" }}>
             📍 {ticket.section} · {ticket.seat} · {ticket.city}
           </p>
@@ -95,7 +172,8 @@ function TicketCard({ ticket }: { ticket: TicketListing }) {
               <span className="font-display font-800 text-white text-lg">{fmt(ticket.price)}</span>
             </div>
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation(); // Chặn lan truyền để không bật modal chi tiết khi chỉ muốn bấm Mua ngay
                 if (!isLoggedIn) { setAuthModal("login"); return; }
                 openCheckout(ticket);
               }}
@@ -115,7 +193,6 @@ const ALL_EVENTS = EVENTS;
 export default function Marketplace() {
   const { setSelectedEvent, nav, t, dynamicMarketListings } = useApp();
   const [supabaseTickets, setSupabaseTickets] = useState<TicketListing[]>([]);
-  const [loading, setLoading] = useState(true);
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [selTier, setSelTier] = useState("all");
@@ -195,8 +272,6 @@ export default function Marketplace() {
         }
       } catch (err) {
         console.error("Lỗi kết nối Supabase:", err);
-      } finally {
-        setLoading(false);
       }
     }
 
@@ -221,7 +296,6 @@ export default function Marketplace() {
     };
   }, []);
 
-  // LOẠI BỎ HOÀN TOÀN TICKET_LISTINGS MẪU: Chỉ kết hợp Supabase + dynamicMarketListings[cite: 19]
   const combined = [...supabaseTickets, ...dynamicMarketListings];
   const seenIds = new Set<number>();
   const allListings = combined.filter(tk => {

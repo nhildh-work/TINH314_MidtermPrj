@@ -158,6 +158,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // 🛠️ TỰ ĐỘNG ĐỒNG BỘ TRẠNG THÁI KYC TỪ DATABASE VÀ PROFILE HIỆN TẠI
+  useEffect(() => {
+    if (currentProfile) {
+      const dbKycStatus = (currentProfile as any).kyc_status;
+      const isSellerRole = currentProfile.role === "seller" || (currentProfile as any).is_verified === true;
+
+      if (dbKycStatus === "approved" || isSellerRole) {
+        setKycStatus("approved");
+      } else if (dbKycStatus === "pending") {
+        setKycStatus("pending");
+      } else if (dbKycStatus === "rejected") {
+        setKycStatus("rejected" as KycStatus);
+      } else {
+        setKycStatus("none");
+      }
+    } else {
+      setKycStatus("none");
+    }
+  }, [currentProfile]);
+
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(registeredUsers));

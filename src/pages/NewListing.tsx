@@ -25,6 +25,7 @@ export default function NewListing() {
   const [venue, setVenue] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [price, setPrice] = useState("");
+  const [quantity, setQuantity] = useState("1"); // Ô nhập số lượng vé
 
   const [ticketFile, setTicketFile] = useState<File | null>(null);
   const [mapFile, setMapFile] = useState<File | null>(null);
@@ -43,17 +44,19 @@ export default function NewListing() {
   }, []);
 
   const numPrice = Number(price) || 0;
-  const depositAmount = Math.round(numPrice * 0.25);
-  const payoutOnSale = depositAmount + Math.round(numPrice * 0.95);
+  const numQty = Math.max(1, parseInt(quantity) || 1);
+  const singleDeposit = Math.round(numPrice * 0.25);
+  const totalDepositAmount = singleDeposit * numQty; // Tổng cọc nhân theo số lượng
+  const payoutOnSale = (singleDeposit + Math.round(numPrice * 0.95)) * numQty;
 
   const step1Valid = eventName.trim() && tier.trim() && city.trim() && eventDate.trim();
-  const step2Valid = numPrice > 0 && ticketFile !== null;
+  const step2Valid = numPrice > 0 && numQty > 0 && ticketFile !== null;
 
-  const depositQrUrl = depositRefCode && depositAmount > 0
-    ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${depositAmount}&addInfo=${encodeURIComponent(depositRefCode)}&accountName=NGUYEN DINH NGUYEN`
+  const depositQrUrl = depositRefCode && totalDepositAmount > 0
+    ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${totalDepositAmount}&addInfo=${encodeURIComponent(depositRefCode)}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  // TỰ ĐỘNG KHỞI TẠO VÉ & LẮNG NGHE WEBHOOK KHI VÀO BƯỚC 3
+  // TỰ ĐỘNG KHỞI TẠO N VÉ VÀ LẮNG NGHE WEBHOOK KHI VÀO BƯỚC 3
   const handleProceedToStep3 = async () => {
     if (!currentUser) {
       setAuthModal("login");
@@ -69,10 +72,10 @@ export default function NewListing() {
       setLoading(true);
       setErrorMsg(null);
 
-      // 1. Insert vé với trạng thái chờ ký quỹ (pending_deposit)
-      const { data: ticketData, error: ticketError } = await supabase
-        .from("tickets")
-        .insert({
+      // 1. Tạo danh sách N vé trùng lặp theo số lượng nhập vào
+      const ticketsToInsert = [];
+      for (let i = 0; i < numQty; i++) {
+        ticketsToInsert.push({
           seller_id: currentUser.id,
           event_name: eventName.trim(),
           price: numPrice,
@@ -83,26 +86,31 @@ export default function NewListing() {
           event_date: eventDate.trim(),
           event_image: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
           section: tier.trim(),
-          seat: "—",
-        })
-        .select()
-        .single();
+          seat: numQty > 1 ? `Ghế tự do #${i + 1}` : "—",
+        });
+      }
+
+      // Insert đồng thời tất cả các vé vào Supabase
+      const { data: insertedTickets, error: ticketError } = await supabase
+        .from("tickets")
+        .insert(ticketsToInsert)
+        .select();
 
       if (ticketError) throw ticketError;
 
-      // 2. Tạo bản ghi transaction chờ thanh toán cọc
-      if (ticketData?.id) {
+      // 2. Tạo bản ghi transaction chờ thanh toán cọc tổng
+      if (insertedTickets && insertedTickets.length > 0) {
         await supabase.from("transactions").insert({
-          ticket_id: ticketData.id,
+          ticket_id: insertedTickets[0].id,
           buyer_id: currentUser.id,
-          amount: depositAmount,
+          amount: totalDepositAmount,
           status: "pending",
           reference_code: depositRefCode,
         });
 
         // 3. ĐĂNG KÝ SUPABASE REALTIME: Tự động nhận diện khi SePay webhook xác nhận thanh toán cọc thành công
         const channel = supabase
-          .channel(`deposit_listener_${ticketData.id}`)
+          .channel(`deposit_listener_${insertedTickets[0].id}`)
           .on(
             'postgres_changes',
             {
@@ -111,13 +119,15 @@ export default function NewListing() {
               table: 'transactions',
               filter: `reference_code=eq.${depositRefCode}`,
             },
-            (payload: any) => {
-              if (payload.new.status === 'paid') {
-                // Cập nhật trạng thái vé thành available trên sàn
-                supabase.from('tickets').update({ status: 'available' }).eq('id', ticketData.id);
+            async (payload: any) => {
+              const st = payload.new.status;
+              if (st === 'paid' || st === 'completed') {
+                // Cập nhật TẤT CẢ các vé vừa đăng thành 'available' để đưa lên sàn
+                const insertedIds = insertedTickets.map((t: any) => t.id);
+                await supabase.from('tickets').update({ status: 'available' }).in('id', insertedIds);
 
-                const newListing = {
-                  id: Number(ticketData.id),
+                const newListings = insertedTickets.map((tItem: any) => ({
+                  id: Number(tItem.id),
                   eventId: 0,
                   eventTitle: eventName.trim(),
                   eventImage: "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&h=400&fit=crop&auto=format",
@@ -126,7 +136,7 @@ export default function NewListing() {
                   tier: tier.trim(),
                   tierColor: "#A78BFA",
                   section: tier.trim(),
-                  seat: "—",
+                  seat: tItem.seat,
                   price: numPrice,
                   officialPrice: numPrice,
                   sellerName: currentProfile?.full_name || currentUser.email?.split("@")[0] || "Người bán chính chủ",
@@ -134,9 +144,9 @@ export default function NewListing() {
                   sellerReviews: 1,
                   verified: true,
                   minimapUrl: mapFile ? URL.createObjectURL(mapFile) : undefined,
-                };
+                }));
 
-                setDynamicMarketListings([newListing, ...dynamicMarketListings]);
+                setDynamicMarketListings([...newListings, ...dynamicMarketListings]);
                 setDone(true);
                 supabase.removeChannel(channel);
               }
@@ -197,10 +207,10 @@ export default function NewListing() {
             <div className="text-5xl mb-4">🎉</div>
             <h2 className="font-display font-800 text-white text-2xl mb-2">Nhận Diện Ký Quỹ Thành Công!</h2>
             <p className="text-sm mb-4 max-w-md mx-auto text-gray-300 leading-relaxed">
-              Hệ thống SePay đã tự động xác thực khoản cọc <strong className="text-amber-400">{fmt(depositAmount)}</strong>. Vé sự kiện <strong className="text-purple-300">"{eventName}"</strong> đã được tự động phát hành lên sàn Chợ Vé SafePass.
+              Hệ thống SePay đã tự động xác thực khoản cọc <strong className="text-amber-400">{fmt(totalDepositAmount)}</strong> ({numQty} vé). Vé sự kiện <strong className="text-purple-300">"{eventName}"</strong> đã được tự động phát hành lên sàn Chợ Vé SafePass.
             </p>
             <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/20 max-w-md mx-auto text-xs text-purple-200 mb-6 space-y-1 text-left">
-              <p>• <strong>Trạng thái:</strong> Đang mở bán công khai.</p>
+              <p>• <strong>Số lượng vé:</strong> {numQty} vé mở bán công khai.</p>
               <p>• <strong>Khi bán thành công:</strong> Nhận ngay <strong className="text-emerald-400">{fmt(payoutOnSale)}</strong> (100% cọc + 95% tiền vé).</p>
             </div>
             <div className="flex gap-3 justify-center">
@@ -310,29 +320,44 @@ export default function NewListing() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="sp-filter-label mb-1.5 block">Giá bán niêm yết cho người mua (VND) *</label>
-                  <input
-                    type="number"
-                    value={price}
-                    onChange={e => setPrice(e.target.value)}
-                    className="sp-input text-lg font-display font-700"
-                    placeholder="Nhập giá vé (VD: 1000000)"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="sp-filter-label mb-1.5 block">Giá bán 1 vé (VND) *</label>
+                    <input
+                      type="number"
+                      value={price}
+                      onChange={e => setPrice(e.target.value)}
+                      className="sp-input text-lg font-display font-700"
+                      placeholder="Nhập giá vé (VD: 1000000)"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="sp-filter-label mb-1.5 block">Số lượng vé muốn đăng bán *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={quantity}
+                      onChange={e => setQuantity(e.target.value)}
+                      className="sp-input text-lg font-display font-700 text-purple-300"
+                      placeholder="Số lượng (VD: 1, 2, 5...)"
+                    />
+                  </div>
                 </div>
 
                 {numPrice > 0 && (
                   <div className="p-4 rounded-xl bg-[#0a0a18] border border-white/10 space-y-2 text-xs">
                     <div className="flex justify-between items-center text-gray-300">
-                      <span>Tiền cọc ký quỹ bắt buộc (25%):</span>
-                      <span className="font-display font-800 text-amber-400 text-sm">{fmt(depositAmount)}</span>
+                      <span>Tiền cọc ký quỹ (25% x {numQty} vé):</span>
+                      <span className="font-display font-800 text-amber-400 text-sm">{fmt(totalDepositAmount)}</span>
                     </div>
                     <div className="flex justify-between items-center text-gray-400">
                       <span>Phí nền tảng SafePass (5%):</span>
-                      <span className="font-semibold text-gray-300">-{fmt(Math.round(numPrice * 0.05))}</span>
+                      <span className="font-semibold text-gray-300">-{fmt(Math.round(numPrice * 0.05 * numQty))}</span>
                     </div>
                     <div className="flex justify-between items-center pt-2 border-t border-white/10 text-white">
-                      <span className="font-bold text-emerald-400">Tổng tiền nhận về khi bán xong:</span>
+                      <span className="font-bold text-emerald-400">Tổng tiền nhận về khi bán xong tất cả:</span>
                       <span className="font-display font-800 text-emerald-400 text-sm">{fmt(payoutOnSale)}</span>
                     </div>
                   </div>
@@ -456,12 +481,12 @@ export default function NewListing() {
                     <p className="text-xs text-amber-400 font-semibold mt-0.5">Hệ thống SePay đang lắng nghe giao dịch chuyển khoản</p>
                   </div>
                   <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/25 font-bold">
-                    Cọc: {fmt(depositAmount)}
+                    Cọc ({numQty} vé): {fmt(totalDepositAmount)}
                   </span>
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 text-left leading-relaxed">
-                  🔄 <strong>Đang chờ SePay Webhook tự động nhận diện:</strong> Vui lòng quét mã QR bên dưới bằng App Ngân hàng với đúng nội dung <strong className="text-amber-300">{depositRefCode}</strong>. Ngay khi tiền vào tài khoản, hệ thống sẽ tự động đưa vé lên sàn mà không cần bấm nút xác nhận nào!
+                  🔄 <strong>Đang chờ SePay Webhook tự động nhận diện:</strong> Vui lòng quét mã QR bên dưới bằng App Ngân hàng với đúng nội dung <strong className="text-amber-300">{depositRefCode}</strong>. Ngay khi tiền vào tài khoản, hệ thống sẽ tự động đưa {numQty} vé lên sàn cùng lúc!
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center p-4 rounded-2xl bg-[#080816] border border-white/8 text-left">
@@ -521,13 +546,13 @@ export default function NewListing() {
                     </div>
 
                     <div className="flex justify-between items-center py-1 border-b border-white/5">
-                      <span className="text-gray-400">Số tiền cọc (25%):</span>
+                      <span className="text-gray-400">Tổng tiền cọc ({numQty} vé):</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="font-display font-800 text-amber-400 text-sm">{fmt(depositAmount)}</span>
+                        <span className="font-display font-800 text-amber-400 text-sm">{fmt(totalDepositAmount)}</span>
                         <button
                           type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(String(depositAmount));
+                            navigator.clipboard.writeText(String(totalDepositAmount));
                             setCopiedAmount(true);
                             setTimeout(() => setCopiedAmount(false), 2000);
                           }}

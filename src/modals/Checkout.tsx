@@ -22,7 +22,6 @@ export default function CheckoutModal() {
   const [copiedAcc, setCopiedAcc] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState(false);
 
-  // Initialize transaction and ref code on modal load
   useEffect(() => {
     if (!checkoutTicket) return;
     if (!currentUser) {
@@ -47,7 +46,7 @@ export default function CheckoutModal() {
             reference_code: code,
           });
 
-          // Lock ticket so it's reserved
+          // Tạm khóa vé để giữ chỗ
           await supabase
             .from("tickets")
             .update({ status: "locked" })
@@ -63,11 +62,10 @@ export default function CheckoutModal() {
     initTransaction();
   }, [checkoutTicket, currentUser]);
 
-  // Poll Supabase & Realtime subscription to check if SePay webhook confirmed payment
   useEffect(() => {
     if (!qrReady || paymentStatus === "paid" || !refCode) return;
 
-    // Realtime subscription for instant webhook confirmation
+    // Lắng nghe Realtime Webhook từ SePay/Supabase
     const channel = supabase
       .channel(`tx-${refCode}`)
       .on(
@@ -79,14 +77,15 @@ export default function CheckoutModal() {
           filter: `reference_code=eq.${refCode}`,
         },
         (payload) => {
-          if (payload.new && (payload.new as any).status === "paid") {
+          const st = (payload.new as any)?.status;
+          if (st === "paid" || st === "completed") {
             completePurchase();
           }
         }
       )
       .subscribe();
 
-    // Polling fallback every 3 seconds
+    // Polling dự phòng mỗi 3 giây
     const interval = setInterval(async () => {
       try {
         const { data } = await supabase
@@ -95,7 +94,7 @@ export default function CheckoutModal() {
           .eq("reference_code", refCode)
           .maybeSingle();
 
-        if (data?.status === "paid") {
+        if (data?.status === "paid" || data?.status === "completed") {
           completePurchase();
           clearInterval(interval);
         }
@@ -119,8 +118,21 @@ export default function CheckoutModal() {
     ? `https://img.vietqr.io/image/mb-04111724267899-compact2.png?amount=${total}&addInfo=${refCode}&accountName=NGUYEN DINH NGUYEN`
     : "";
 
-  const completePurchase = () => {
+  // HÀM XÁC NHẬN MUA THÀNH CÔNG: ĐỔI TRẠNG THÁI VÉ SANG 'sold' ĐỂ ẨN KHỎI CHỢ
+  const completePurchase = async () => {
     setPaymentStatus("paid");
+
+    if (checkoutTicket && checkoutTicket.id) {
+      try {
+        await supabase
+          .from("tickets")
+          .update({ status: "sold" })
+          .eq("id", checkoutTicket.id);
+      } catch (err) {
+        console.error("Lỗi cập nhật trạng thái vé sang sold:", err);
+      }
+    }
+
     addToCart();
     addPurchasedTicket({
       id: Date.now(),
