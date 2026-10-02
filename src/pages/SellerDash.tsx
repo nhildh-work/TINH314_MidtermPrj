@@ -1,101 +1,225 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../context";
-import { MY_LISTINGS, type MyListing } from "../data";
+import { type MyListing } from "../data";
 import { supabase } from "../lib/supabaseClient";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
+function normalizeName(str: string): string {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
 const STATUS_CFG = {
-  available: { label: "AVAILABLE", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
-  locked:    { label: "LOCKED",    color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
-  completed: { label: "COMPLETED", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
+  available: { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
+  locked:    { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
+  completed: { label: "ĐÃ BÁN THÀNH CÔNG", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
 } as const;
 
-const PENDING = MY_LISTINGS.reduce((s, l) => s + (l.status !== "completed" ? l.price : 0), 0);
-const FEE_RATE = 0.015;
-
-function WithdrawModal({ onClose }: { onClose: () => void }) {
-  const { t } = useApp();
-  const fee = Math.round(PENDING * FEE_RATE);
-  const net = PENDING - fee;
+function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
+  const { currentProfile, refreshProfile } = useApp();
+  const [bank, setBank] = useState(currentProfile?.bank_name || "MB Bank");
+  const [accountNum, setAccountNum] = useState(currentProfile?.bank_account || "04111724267899");
+  const [accountName, setAccountName] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "NGUYEN DINH NGUYEN");
+  const [amount, setAmount] = useState<string>(balance > 0 ? String(balance) : "0");
+  const [bankError, setBankError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
 
+  const numAmount = Number(amount) || 0;
+  const isZero = balance <= 0;
+
+  const handleConfirmWithdraw = async () => {
+    setBankError(null);
+    if (!accountNum.trim() || !bank.trim() || !accountName.trim()) {
+      setBankError("Vui lòng điền đầy đủ thông tin tài khoản ngân hàng!");
+      return;
+    }
+
+    // Strict KYC Name Match validation for Seller
+    const registeredName = normalizeName(currentProfile?.full_name || "");
+    const inputHolder = normalizeName(accountName);
+
+    if (registeredName && inputHolder !== registeredName) {
+      setBankError(
+        `Tên chủ tài khoản ngân hàng ("${accountName}") phải trùng khớp tuyệt đối với họ tên trên CCCD đã xác thực ("${currentProfile?.full_name}")!`
+      );
+      return;
+    }
+
+    if (numAmount <= 0 || numAmount > balance) {
+      setBankError("Số tiền rút không hợp lệ hoặc vượt quá số dư khả dụng!");
+      return;
+    }
+
+    // Save bank details to profile
+    if (currentProfile?.id) {
+      try {
+        await supabase.from("profiles").update({
+          bank_name: bank,
+          bank_account: accountNum,
+          bank_holder: accountName,
+        }).eq("id", currentProfile.id);
+        await refreshProfile();
+      } catch (e) {
+        console.warn("Notice updating seller bank:", e);
+      }
+    }
+
+    setConfirmed(true);
+  };
+
   if (confirmed) return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)" }}>
-      <div className="sp-card p-8 max-w-sm w-full text-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }}>
+      <div className="sp-card p-8 max-w-md w-full text-center">
         <div className="text-5xl mb-3">✅</div>
-        <h2 className="font-display font-800 text-white text-lg mb-1">{t.withdrawSent}</h2>
-        <p className="text-sm mb-5" style={{ color: "#9ca3af" }}>{t.withdrawSentSub(fmt(net))}</p>
-        <button onClick={onClose} className="sp-btn-primary w-full py-3 font-display font-700">{t.closeBtn}</button>
+        <h2 className="font-display font-800 text-white text-xl mb-1">Yêu cầu rút tiền đã được gửi!</h2>
+        <p className="text-sm mb-5 text-gray-300">
+          Số tiền <strong className="text-emerald-400">{fmt(numAmount)}</strong> sẽ được giải ngân vào tài khoản chính chủ {bank} ({accountNum} - {accountName}) của bạn trong vòng 1-2 giờ làm việc.
+        </p>
+        <button onClick={onClose} className="sp-btn-primary w-full py-3 font-display font-700 cursor-pointer">
+          Đóng
+        </button>
       </div>
     </div>
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="sp-card p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
-        <h2 className="font-display font-800 text-white text-lg mb-1">{t.withdrawTitle}</h2>
-        <p className="text-xs mb-5" style={{ color: "#6b7280" }}>{t.withdrawSub}</p>
-
-        <div className="rounded-xl p-4 mb-4 space-y-2.5" style={{ background: "#0a0a14" }}>
-          <div className="flex justify-between text-sm">
-            <span style={{ color: "#9ca3af" }}>{t.balance}</span>
-            <span className="font-display font-700 text-white">{fmt(PENDING)}</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(10px)" }} onClick={onClose}>
+      <div className="sp-card p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between pb-3 border-b border-white/5 mb-4">
+          <div>
+            <h2 className="font-display font-800 text-white text-lg">Rút Tiền Về Ngân Hàng</h2>
+            <p className="text-[11px] text-purple-400">Yêu cầu tên chủ TK trùng khớp với CCCD</p>
           </div>
-          <div className="flex justify-between text-sm">
-            <span style={{ color: "#9ca3af" }}>{t.earlyFee}</span>
-            <span className="font-display font-700" style={{ color: "#F87171" }}>-{fmt(fee)}</span>
-          </div>
-          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: "0.6rem" }} className="flex justify-between">
-            <span className="font-display font-700 text-white text-sm">{t.netReceive}</span>
-            <span className="font-display font-800 text-white text-base">{fmt(net)}</span>
-          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">✕</button>
         </div>
 
-        <div className="flex items-start gap-2.5 p-3 rounded-xl mb-5" style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.18)" }}>
-          <span className="text-sm shrink-0">⚠️</span>
-          <p className="text-xs leading-relaxed" style={{ color: "#d1a927" }}>
-            {t.waitWarning(fmt(PENDING))}
-          </p>
-        </div>
+        {isZero ? (
+          <div className="text-center py-6">
+            <div className="text-4xl mb-3">💰</div>
+            <p className="font-display font-700 text-white text-base mb-1">Số dư khả dụng: 0 VND</p>
+            <p className="text-xs text-gray-400 mb-6 leading-relaxed">
+              Bạn chưa có vé nào hoàn tất giao dịch. Khi có người mua vé và hoàn tất sự kiện, tiền vé (95%) cùng 100% tiền cọc ký quỹ (25%) sẽ tự động chuyển vào số dư khả dụng để bạn rút về tài khoản.
+            </p>
+            <button onClick={onClose} className="sp-btn-ghost px-6 py-2.5 font-display font-700 cursor-pointer">
+              Đã hiểu
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 flex justify-between items-center text-xs">
+              <span className="text-gray-300">Số dư khả dụng có thể rút:</span>
+              <span className="font-display font-800 text-emerald-400 text-sm">{fmt(balance)}</span>
+            </div>
 
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 sp-btn-ghost py-3 font-display font-700">{t.cancelBtn}</button>
-          <button onClick={() => setConfirmed(true)} className="flex-1 sp-btn-primary py-3 font-display font-700 text-sm">
-            {t.confirmWithdraw(fmt(net))}
-          </button>
-        </div>
+            <div>
+              <label className="sp-filter-label mb-1.5 block">Ngân hàng thụ hưởng *</label>
+              <select value={bank} onChange={e => setBank(e.target.value)} className="sp-select">
+                <option value="MB Bank">MB Bank (Quân Đội)</option>
+                <option value="Vietcombank">Vietcombank</option>
+                <option value="Techcombank">Techcombank</option>
+                <option value="BIDV">BIDV</option>
+                <option value="VPBank">VPBank</option>
+                <option value="ACB">ACB</option>
+                <option value="TPBank">TPBank</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng *</label>
+              <input
+                value={accountNum}
+                onChange={e => setAccountNum(e.target.value)}
+                className="sp-input font-mono"
+                placeholder="Nhập số tài khoản"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="sp-filter-label">Tên chủ tài khoản (Khớp 100% CCCD) *</label>
+                <span className="text-[10px] text-amber-400 font-semibold">🔒 Bắt buộc trùng CCCD</span>
+              </div>
+              <input
+                value={accountName}
+                onChange={e => setAccountName(e.target.value)}
+                className="sp-input uppercase font-bold tracking-wide"
+                placeholder={currentProfile?.full_name || "NGUYEN DINH NGUYEN"}
+              />
+              <p className="text-[10px] text-gray-500 mt-1">
+                Tên đăng ký trên CCCD: <strong className="text-gray-300">{currentProfile?.full_name || "Chưa định danh"}</strong>
+              </p>
+            </div>
+
+            <div>
+              <label className="sp-filter-label mb-1.5 block">Số tiền muốn rút (VND)</label>
+              <input
+                type="number"
+                value={amount}
+                max={balance}
+                onChange={e => setAmount(e.target.value)}
+                className="sp-input font-display font-700 text-purple-300"
+              />
+            </div>
+
+            {bankError && (
+              <div className="p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300 leading-relaxed">
+                ⚠️ {bankError}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={onClose} className="flex-1 sp-btn-ghost py-3 font-display font-700 cursor-pointer">
+                Hủy
+              </button>
+              <button
+                onClick={handleConfirmWithdraw}
+                disabled={numAmount <= 0 || numAmount > balance}
+                className="flex-1 sp-btn-primary py-3 font-display font-700 text-sm cursor-pointer disabled:opacity-40"
+              >
+                Xác nhận rút {fmt(numAmount)}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function DetailModal({ listing, onClose }: { listing: MyListing; onClose: () => void }) {
-  const { t } = useApp();
-  const cfg = STATUS_CFG[listing.status];
+  const cfg = STATUS_CFG[listing.status] || STATUS_CFG.available;
   const [cancelled, setCancelled] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)" }} onClick={onClose}>
       <div className="sp-card p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-5">
           <h2 className="font-display font-700 text-white text-sm leading-snug pr-4">{listing.eventTitle}</h2>
-          <button onClick={onClose} style={{ color: "rgba(255,255,255,0.4)", fontSize: "1.1rem", lineHeight: 1 }}>✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
 
         <div className="space-y-3 mb-5">
-          {[
-            { label: t.colTier, val: listing.tier, accent: "#A78BFA" },
-            { label: t.colDate, val: listing.date, accent: undefined },
-            { label: t.colPrice, val: fmt(listing.price), accent: "#fff" },
-          ].map(r => (
-            <div key={r.label} className="flex justify-between items-center">
-              <span className="sp-filter-label">{r.label}</span>
-              <span className="font-display font-700 text-sm" style={{ color: r.accent ?? "#9ca3af" }}>{r.val}</span>
-            </div>
-          ))}
           <div className="flex justify-between items-center">
-            <span className="sp-filter-label">{t.colStatus}</span>
+            <span className="sp-filter-label">Hạng vé</span>
+            <span className="font-display font-700 text-sm text-purple-400">{listing.tier}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="sp-filter-label">Thời gian</span>
+            <span className="font-display font-700 text-sm text-gray-300">{listing.date}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="sp-filter-label">Giá niêm yết</span>
+            <span className="font-display font-700 text-sm text-white">{fmt(listing.price)}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="sp-filter-label">Trạng thái</span>
             <span className="text-xs font-display font-700 px-2.5 py-1 rounded-full" style={{ color: cfg.color, background: cfg.bg }}>
               {cfg.label}
             </span>
@@ -104,21 +228,19 @@ function DetailModal({ listing, onClose }: { listing: MyListing; onClose: () => 
 
         {cancelled ? (
           <div className="text-center py-3">
-            <p className="text-sm font-display font-700 text-lime-400">{t.cancelledListing}</p>
+            <p className="text-sm font-display font-700 text-lime-400">Đã hủy niêm yết vé</p>
           </div>
         ) : listing.status === "available" ? (
           <button
             onClick={() => setCancelled(true)}
-            className="w-full py-3 rounded-xl font-display font-700 text-sm transition-all"
+            className="w-full py-3 rounded-xl font-display font-700 text-sm transition-all cursor-pointer"
             style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)", color: "#F87171" }}
-            onMouseEnter={e => (e.currentTarget.style.background = "rgba(248,113,113,0.18)")}
-            onMouseLeave={e => (e.currentTarget.style.background = "rgba(248,113,113,0.1)")}
           >
-            {t.cancelListing}
+            Hủy niêm yết vé
           </button>
         ) : (
-          <p className="text-xs text-center" style={{ color: "#4b5563" }}>
-            {listing.status === "locked" ? t.lockedNoCancel : t.completedNoCancel}
+          <p className="text-xs text-center text-gray-400">
+            {listing.status === "locked" ? "Vé đang được giao dịch (Tạm khóa)." : "Vé đã bán thành công."}
           </p>
         )}
       </div>
@@ -127,10 +249,28 @@ function DetailModal({ listing, onClose }: { listing: MyListing; onClose: () => 
 }
 
 export default function SellerDash() {
-  const { nav, kycStatus, setKycStatus, currentUser, dynamicMarketListings, t } = useApp();
+  const { nav, kycStatus, currentProfile, currentUser, refreshProfile, t } = useApp();
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [detailListing, setDetailListing] = useState<MyListing | null>(null);
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
+
+  // Seller Bank Update Card State
+  const [bankAccountNum, setBankAccountNum] = useState(currentProfile?.bank_account || "");
+  const [bankName, setBankName] = useState(currentProfile?.bank_name || "MB Bank");
+  const [bankAccountHolder, setBankAccountHolder] = useState(currentProfile?.bank_holder || currentProfile?.full_name || "");
+  const [bankError, setBankError] = useState<string | null>(null);
+  const [bankSavedSuccess, setBankSavedSuccess] = useState(false);
+  const [savingBank, setSavingBank] = useState(false);
+
+  useEffect(() => {
+    if (currentProfile) {
+      if (currentProfile.bank_name) setBankName(currentProfile.bank_name);
+      if (currentProfile.bank_account) setBankAccountNum(currentProfile.bank_account);
+      if (currentProfile.bank_holder || currentProfile.full_name) {
+        setBankAccountHolder(currentProfile.bank_holder || currentProfile.full_name || "");
+      }
+    }
+  }, [currentProfile]);
 
   useEffect(() => {
     const uid = currentUser?.id;
@@ -143,7 +283,7 @@ export default function SellerDash() {
           .eq("seller_id", uid)
           .order("created_at", { ascending: false });
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           const mapped: MyListing[] = data.map((t: any) => ({
             id: Number(t.id),
             eventTitle: t.event_name,
@@ -162,10 +302,55 @@ export default function SellerDash() {
     loadSellerTickets();
   }, [currentUser]);
 
-  // Chỉ hiển thị vé do chính người bán này tạo ra, tài khoản mới sẽ bắt đầu với 0 vé
+  const handleSaveSellerBank = async () => {
+    setBankError(null);
+    setBankSavedSuccess(false);
+
+    if (!bankAccountNum.trim() || !bankName.trim() || !bankAccountHolder.trim()) {
+      setBankError("Vui lòng điền đầy đủ thông tin tài khoản ngân hàng!");
+      return;
+    }
+
+    // Strict KYC Name Match validation for Seller
+    const registeredName = normalizeName(currentProfile?.full_name || "");
+    const inputHolder = normalizeName(bankAccountHolder);
+
+    if (registeredName && inputHolder !== registeredName) {
+      setBankError(
+        `Tên chủ tài khoản ngân hàng ("${bankAccountHolder}") phải trùng khớp tuyệt đối với họ tên trên CCCD đã xác thực ("${currentProfile?.full_name}")!`
+      );
+      return;
+    }
+
+    try {
+      setSavingBank(true);
+      if (currentProfile?.id) {
+        await supabase.from("profiles").update({
+          bank_name: bankName,
+          bank_account: bankAccountNum.trim(),
+          bank_holder: bankAccountHolder.trim().toUpperCase(),
+        }).eq("id", currentProfile.id);
+      }
+      await refreshProfile();
+      setBankSavedSuccess(true);
+      setTimeout(() => setBankSavedSuccess(false), 3000);
+    } catch (err: any) {
+      setBankError(err.message || "Lỗi lưu thông tin tài khoản ngân hàng");
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
   const allSellerListings = sellerTickets;
 
-  if (kycStatus !== "approved") {
+  // KYC persists once completed
+  const isKycApproved =
+    kycStatus === "approved" ||
+    currentProfile?.kyc_status === "approved" ||
+    currentProfile?.is_verified === true ||
+    currentProfile?.role === "seller";
+
+  if (!isKycApproved) {
     return (
       <div className="max-w-xl mx-auto px-4 py-24 text-center">
         <div className="w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-6 text-4xl"
@@ -175,121 +360,210 @@ export default function SellerDash() {
         <h2 className="font-display font-800 text-white text-2xl mb-2">{t.kycRequired}</h2>
         <p className="text-sm mb-2 max-w-xs mx-auto leading-relaxed" style={{ color: "#9ca3af" }}>{t.kycSub}</p>
         <p className="text-xs mb-6" style={{ color: "#4b5563" }}>{t.kycNote}</p>
-        <button onClick={() => nav("kyc")} className="sp-btn-primary px-8 py-3 font-display font-700">
+        <button onClick={() => nav("kyc")} className="sp-btn-primary px-8 py-3 font-display font-700 cursor-pointer">
           {t.kycStart}
         </button>
-
       </div>
     );
   }
 
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
-  const currentPending = allSellerListings.reduce((s, l) => s + (l.status !== "completed" ? l.price : 0), 0);
+  const soldListings = allSellerListings.filter(l => l.status === "completed");
+  
+  // Available balance = 95% price + 100% deposit for sold tickets
+  const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
 
   const STATS = [
-    { label: t.totalListings,  value: String(allSellerListings.length), icon: "🎟️", color: "#8B5CF6" },
-    { label: t.activeSelling,  value: String(activeCount),         icon: "🟢", color: "#A3E635" },
-    { label: t.pendingPayout,  value: fmt(currentPending),         icon: "💰", color: "#FBBF24" },
+    { label: "Tổng số vé niêm yết", value: String(allSellerListings.length), icon: "🎟️", color: "#8B5CF6" },
+    { label: "Đang mở bán", value: String(activeCount), icon: "🟢", color: "#A3E635" },
+    { label: "Số dư khả dụng để rút", value: fmt(availableBalance), icon: "💰", color: "#10B981" },
   ];
 
   return (
     <div className="max-w-[1680px] mx-auto px-5 lg:px-8 py-8">
-      {showWithdraw && <WithdrawModal onClose={() => setShowWithdraw(false)} />}
+      {showWithdraw && <WithdrawModal balance={availableBalance} onClose={() => setShowWithdraw(false)} />}
       {detailListing && <DetailModal listing={detailListing} onClose={() => setDetailListing(null)} />}
 
-      <div className="flex items-center justify-between mb-7">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-7">
         <div>
           <h1 className="font-display font-800 text-white text-2xl">{t.sellerDashTitle}</h1>
-          <p className="text-sm mt-0.5" style={{ color: "#6b7280" }}>{t.sellerDashSub}</p>
+          <p className="text-sm mt-0.5 text-gray-400">{t.sellerDashSub}</p>
         </div>
         <div className="flex gap-3">
-          <button onClick={() => nav("dispute-center")} className="sp-btn-ghost px-4 py-2.5 font-display font-700 text-sm"
+          <button onClick={() => nav("dispute-center")} className="sp-btn-ghost px-4 py-2.5 font-display font-700 text-sm cursor-pointer"
             style={{ borderColor: "rgba(248,113,113,0.25)", color: "#F87171" }}>
-            {t.disputeBtn}
+            Trung tâm tranh chấp
           </button>
-          <button onClick={() => nav("new-listing")} className="sp-btn-primary px-5 py-2.5 font-display font-700">
-            {t.listNew}
+          <button onClick={() => nav("new-listing")} className="sp-btn-primary px-5 py-2.5 font-display font-700 cursor-pointer">
+            + Đăng bán vé mới
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {STATS.map(s => (
           <div key={s.label} className="sp-card p-5">
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" style={{ background: s.color + "1a" }}>
                 {s.icon}
               </div>
-              <p className="text-xs" style={{ color: "#6b7280" }}>{s.label}</p>
+              <p className="text-xs text-gray-400">{s.label}</p>
             </div>
             <p className="font-display font-800 text-white text-2xl">{s.value}</p>
           </div>
         ))}
       </div>
 
-      <div className="mb-5 p-3.5 rounded-xl flex items-center gap-3" style={{ background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.14)" }}>
-        <span className="text-xl">📅</span>
-        <p className="text-sm flex-1" style={{ color: "#9ca3af" }}
-          dangerouslySetInnerHTML={{ __html: typeof t.payoutBanner === "function" ? t.payoutBanner('<strong style="color:#60A5FA">Thứ Sáu hàng tuần</strong>', '<strong style="color:#A78BFA">5%</strong>') : (t.payoutBanner || "") }} />
-        <button onClick={() => setShowWithdraw(true)} className="sp-btn-ghost text-xs px-4 py-2 font-display font-700 shrink-0">
-          {t.withdrawNow}
+      {/* Seller Bank Account Setup with Strict KYC Check */}
+      <div className="sp-card p-6 mb-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-4 border-b border-white/5 mb-4">
+          <div>
+            <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
+              <span>🏦</span>
+              <span>Tài Khoản Ngân Hàng Nhận Tiền & Ký Quỹ</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+                ✓ Chống Rửa Tiền & Giả Mạo
+              </span>
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Họ tên chủ tài khoản ngân hàng bắt buộc phải trùng khớp 100% với CCCD đã xác thực (<strong>{currentProfile?.full_name}</strong>).
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="sp-filter-label mb-1.5 block">Ngân hàng</label>
+            <select value={bankName} onChange={e => setBankName(e.target.value)} className="sp-select">
+              <option value="MB Bank">MB Bank (Quân Đội)</option>
+              <option value="Vietcombank">Vietcombank</option>
+              <option value="Techcombank">Techcombank</option>
+              <option value="BIDV">BIDV</option>
+              <option value="VPBank">VPBank</option>
+              <option value="ACB">ACB</option>
+              <option value="TPBank">TPBank</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="sp-filter-label mb-1.5 block">Số tài khoản ngân hàng</label>
+            <input
+              value={bankAccountNum}
+              onChange={e => setBankAccountNum(e.target.value)}
+              className="sp-input font-mono"
+              placeholder="Nhập số tài khoản"
+            />
+          </div>
+
+          <div>
+            <label className="sp-filter-label mb-1.5 block">Tên chủ tài khoản (In hoa không dấu)</label>
+            <input
+              value={bankAccountHolder}
+              onChange={e => setBankAccountHolder(e.target.value)}
+              className="sp-input uppercase font-bold tracking-wide"
+              placeholder={currentProfile?.full_name || "NGUYEN DINH NGUYEN"}
+            />
+          </div>
+        </div>
+
+        {bankError && (
+          <div className="mt-4 p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/30 text-red-300 leading-relaxed">
+            ⚠️ {bankError}
+          </div>
+        )}
+
+        {bankSavedSuccess && (
+          <div className="mt-4 p-3 rounded-xl text-xs bg-lime-500/10 border border-lime-500/30 text-lime-400 font-bold">
+            ✓ Cập nhật tài khoản ngân hàng chính chủ thành công!
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={handleSaveSellerBank}
+            disabled={savingBank}
+            className="sp-btn-primary px-6 py-2.5 font-display font-700 text-xs cursor-pointer"
+          >
+            {savingBank ? "Đang kiểm tra & Lưu..." : "Lưu & Xác thực TK Ngân Hàng"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-6 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-blue-500/10 border border-blue-500/20">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">📅</span>
+          <div>
+            <p className="text-sm text-gray-200">
+              Chính sách đối soát: <strong className="text-blue-400">Thứ Sáu hàng tuần</strong> hoặc rút trực tiếp khi sự kiện hoàn tất. Phí nền tảng <strong className="text-purple-400">5%</strong>.
+            </p>
+            <p className="text-xs text-gray-400">
+              Tiền cọc ký quỹ 25% được hoàn trả 100% khi giao dịch không có khiếu nại.
+            </p>
+          </div>
+        </div>
+        <button onClick={() => setShowWithdraw(true)} className="sp-btn-primary text-xs px-5 py-2.5 font-display font-700 shrink-0 cursor-pointer">
+          Rút tiền về ngân hàng
         </button>
       </div>
 
       <div className="sp-card overflow-hidden">
         <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-          <h2 className="font-display font-700 text-white text-sm">{t.listingTable}</h2>
-          <span className="text-xs font-display font-600" style={{ color: "#6b7280" }}>{allSellerListings.length}</span>
+          <h2 className="font-display font-700 text-white text-sm">Danh Sách Vé Đã Đăng Bán</h2>
+          <span className="text-xs font-display font-600 text-gray-400">{allSellerListings.length} vé</span>
         </div>
         <div className="overflow-x-auto">
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", display: "table-row" }}>
-                {([t.colEvent, t.colTier, t.colPrice, t.colDate, t.colStatus, ""] as const).map(h => (
-                  <th key={h} className="sp-filter-label" style={{ textAlign: "left", padding: "12px 20px", display: "table-cell" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {allSellerListings.map(listing => {
-                const cfg = STATUS_CFG[listing.status];
-                return (
-                  <tr key={listing.id} className="transition-colors" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", display: "table-row" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    <td className="px-5 py-4">
-                      <p className="text-sm font-600 text-white line-clamp-1">{listing.eventTitle}</p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="text-xs font-display font-700 text-purple-400">{listing.tier}</span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="font-display font-700 text-white text-sm">{fmt(listing.price)}</span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="text-sm" style={{ color: "#9ca3af" }}>{listing.date}</span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="text-xs font-display font-700 px-2.5 py-1 rounded-full" style={{ color: cfg.color, background: cfg.bg }}>
-                        {cfg.label}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <button
-                        onClick={() => setDetailListing(listing)}
-                        className="text-xs font-display font-600 transition-colors"
-                        style={{ color: "#6b7280" }}
-                        onMouseEnter={e => (e.currentTarget.style.color = "#A78BFA")}
-                        onMouseLeave={e => (e.currentTarget.style.color = "#6b7280")}
-                      >
-                        {t.colDetail}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {allSellerListings.length === 0 ? (
+            <div className="p-10 text-center text-gray-400 text-sm">
+              Bạn chưa có vé nào được đăng bán. Bấm nút <strong>"+ Đăng bán vé mới"</strong> để bắt đầu.
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", display: "table-row" }}>
+                  {["SỰ KIỆN", "HẠNG VÉ", "GIÁ NIÊM YẾT", "THỜI GIAN", "TRẠNG THÁI", ""].map(h => (
+                    <th key={h} className="sp-filter-label" style={{ textAlign: "left", padding: "12px 20px", display: "table-cell" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {allSellerListings.map(listing => {
+                  const cfg = STATUS_CFG[listing.status] || STATUS_CFG.available;
+                  return (
+                    <tr
+                      key={listing.id}
+                      onClick={() => setDetailListing(listing)}
+                      className="cursor-pointer hover:bg-white/[0.02] transition-colors"
+                      style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", display: "table-row" }}
+                    >
+                      <td style={{ padding: "14px 20px" }}>
+                        <p className="font-display font-700 text-white text-sm truncate">{listing.eventTitle}</p>
+                      </td>
+                      <td style={{ padding: "14px 20px" }}>
+                        <span className="font-display font-600 text-xs text-purple-400">{listing.tier}</span>
+                      </td>
+                      <td style={{ padding: "14px 20px" }}>
+                        <span className="font-display font-800 text-white text-sm">{fmt(listing.price)}</span>
+                      </td>
+                      <td style={{ padding: "14px 20px" }}>
+                        <span className="text-xs text-gray-400">{listing.date}</span>
+                      </td>
+                      <td style={{ padding: "14px 20px" }}>
+                        <span
+                          className="text-xs font-display font-700 px-2.5 py-0.5 rounded-full inline-block"
+                          style={{ color: cfg.color, background: cfg.bg }}
+                        >
+                          {cfg.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: "14px 20px", textAlign: "right" }}>
+                        <span className="text-xs text-gray-500">Chi tiết →</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

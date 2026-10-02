@@ -128,13 +128,11 @@ export default function Marketplace() {
   useEffect(() => {
     async function fetchTickets() {
       try {
-        setLoading(true);
-        // Query tickets joined with profiles
         const { data, error } = await supabase
           .from("tickets")
           .select(`
             *,
-            profiles:seller_id (
+            profiles (
               id,
               full_name,
               email,
@@ -146,11 +144,38 @@ export default function Marketplace() {
           .order("created_at", { ascending: false });
 
         if (error) {
-          console.error("Lỗi khi tải vé từ Supabase:", error);
+          // Fallback simple query without join if join fails
+          const { data: rawData } = await supabase
+            .from("tickets")
+            .select("*")
+            .eq("status", "available")
+            .order("created_at", { ascending: false });
+
+          if (rawData) {
+            const mapped: TicketListing[] = rawData.map((item: any) => ({
+              id: Number(item.id),
+              eventId: 0,
+              eventTitle: item.event_name,
+              eventImage: item.event_image || "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop&auto=format",
+              eventDate: item.event_date || "Sắp diễn ra",
+              city: item.city || "TP.HCM",
+              tier: item.tier || "Standard",
+              tierColor: "#A78BFA",
+              section: item.section || item.tier || "Khu vực chung",
+              seat: item.seat || "Tự do",
+              price: Number(item.price),
+              officialPrice: Number(item.price),
+              sellerName: "Người bán chính chủ",
+              sellerScore: 5.0,
+              sellerReviews: 10,
+              verified: true,
+            }));
+            setSupabaseTickets(mapped);
+          }
           return;
         }
 
-        if (data && data.length > 0) {
+        if (data) {
           const mapped: TicketListing[] = data.map((item: any) => ({
             id: Number(item.id),
             eventId: 0,
@@ -164,10 +189,10 @@ export default function Marketplace() {
             seat: item.seat || "Tự do",
             price: Number(item.price),
             officialPrice: Number(item.price),
-            sellerName: item.profiles?.full_name || item.profiles?.email?.split("@")[0] || "Người bán ẩn danh",
+            sellerName: item.profiles?.full_name || item.profiles?.email?.split("@")[0] || "Người bán chính chủ",
             sellerScore: 5.0,
             sellerReviews: 10,
-            verified: item.profiles?.role === "seller" || true,
+            verified: true,
           }));
           setSupabaseTickets(mapped);
         }
@@ -179,10 +204,36 @@ export default function Marketplace() {
     }
 
     fetchTickets();
+
+    // Subscribe to realtime ticket updates across all users
+    const channel = supabase
+      .channel("public-tickets-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tickets" },
+        () => {
+          fetchTickets();
+        }
+      )
+      .subscribe();
+
+    // Polling fallback every 5s
+    const pollInterval = setInterval(fetchTickets, 5000);
+
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  // Kết hợp vé thật từ Supabase với dữ liệu mock fallback
-  const allListings = [...supabaseTickets, ...dynamicMarketListings, ...TICKET_LISTINGS];
+  // Kết hợp vé thật từ Supabase với dynamic listings và mock fallback (loại bỏ trùng ID)
+  const combined = [...supabaseTickets, ...dynamicMarketListings, ...TICKET_LISTINGS];
+  const seenIds = new Set<number>();
+  const allListings = combined.filter(tk => {
+    if (seenIds.has(tk.id)) return false;
+    seenIds.add(tk.id);
+    return true;
+  });
 
   const filtered = allListings
     .filter(tk => {

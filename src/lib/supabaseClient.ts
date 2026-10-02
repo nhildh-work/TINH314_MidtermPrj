@@ -13,6 +13,12 @@ export interface ProfileRecord {
   avatar_url: string | null;
   phone?: string | null;
   provider?: "email" | "google";
+  kyc_status?: string | null;
+  is_verified?: boolean | null;
+  cccd_number?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
+  bank_holder?: string | null;
   created_at: string;
 }
 

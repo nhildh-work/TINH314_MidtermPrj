@@ -58,6 +58,9 @@ export interface PendingDispute {
   buyerDetail: string;
   buyerVideo: string;
   buyerSubmittedAt: string;
+  refundBankNum?: string;
+  refundBankName?: string;
+  refundBankHolder?: string;
 }
 
 const STORAGE_USERS_KEY = "safepass_registered_users";

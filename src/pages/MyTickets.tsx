@@ -48,7 +48,8 @@ export default function MyTickets() {
   const [selectedTicketForPass, setSelectedTicketForPass] = useState<MyTicket | null>(null);
 
   useEffect(() => {
-    if (!currentUser) return;
+    const uid = currentUser?.id;
+    if (!uid) return;
 
     async function loadMyTransactions() {
       try {
@@ -69,11 +70,11 @@ export default function MyTickets() {
               price
             )
           `)
-          .eq("buyer_id", currentUser.id);
+          .eq("buyer_id", uid);
 
         if (!error && data && data.length > 0) {
           const mapped: MyTicket[] = data
-            .filter((t: any) => t.tickets)
+            .filter((t: any) => t.tickets && (t.status === "paid" || t.status === "completed" || t.status === "disputed"))
             .map((t: any) => ({
               id: Number(t.tickets.id),
               eventTitle: t.tickets.event_name,
@@ -206,7 +207,7 @@ export default function MyTickets() {
                   </button>
 
                   {/* Actions for LOCKED (Pending Gate Check-in) tickets */}
-                  {isLocked && effectiveStatus !== "dispute" && (
+                  {isLocked && (
                     <div className="space-y-2">
                       <p className="text-xs text-center pb-1 text-gray-400">
                         {t.checkinHint}
