@@ -18,7 +18,6 @@ export default function NewListing() {
   const [qrFile, setQrFile] = useState<File | null>(null);
   const [seatMapFile, setSeatMapFile] = useState<File | null>(null);
   const [seatMapPreview, setSeatMapPreview] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -60,11 +59,6 @@ export default function NewListing() {
         ? `${tier.trim()} [Vị trí: ${seatZone.trim()}]`
         : tier.trim();
 
-      const combinedNotes = [
-        seatZone.trim() ? `Vị trí đứng/ghế: ${seatZone.trim()}` : "",
-        notes.trim()
-      ].filter(Boolean).join(" | ");
-
       // Chuẩn bị dữ liệu danh sách vé theo số lượng người bán điền
       const ticketsToInsert = Array.from({ length: quantity }, (_, idx) => ({
         seller_id: activeUserId,
@@ -76,7 +70,6 @@ export default function NewListing() {
         price: Number(pricePerTicket),
         qr_code_url: qrFile ? qrFile.name : null,
         status: "available",
-        notes: combinedNotes || null,
         created_at: new Date().toISOString(),
       }));
 
@@ -370,20 +363,6 @@ export default function NewListing() {
           <p className="text-[10px] text-gray-400 italic">
             * Tiền cọc 25% được hoàn trả 100% về tài khoản của bạn ngay khi sự kiện kết thúc trôi chảy.
           </p>
-        </div>
-
-        {/* Ghi chú */}
-        <div>
-          <label className="sp-filter-label mb-2 block text-gray-200">
-            Ghi chú thêm cho người mua (Tùy chọn)
-          </label>
-          <textarea
-            rows={2}
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            className="sp-input text-xs"
-            placeholder="VD: Vé chính chủ bao đổi tên, giao vé cứng tận tay tại cổng..."
-          />
         </div>
 
         {errorMsg && (
