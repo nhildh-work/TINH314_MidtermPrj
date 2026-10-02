@@ -25,7 +25,7 @@ export default function CheckoutModal() {
   const [copiedAmount, setCopiedAmount] = useState(false);
 
   // Biến cờ tuyệt đối để phân biệt Luồng Người Bán Đóng Cọc vs Người Mua
-  const isDepositTx = checkoutTicket?.isDeposit === true || checkoutTicket?.tier?.includes("Cọc");
+  const isDepositTx = (checkoutTicket as any)?.isDeposit === true || checkoutTicket?.tier?.includes("Cọc");
 
   const activeUserId = currentUser?.id || currentProfile?.id || "anonymous-user";
 
