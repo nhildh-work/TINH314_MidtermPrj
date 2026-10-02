@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../context";
-import { TICKET_LISTINGS, EVENTS, type TicketListing } from "../data";
+import { EVENTS, type TicketListing } from "../data";
 import { supabase } from "../lib/supabaseClient";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
@@ -110,8 +110,6 @@ function TicketCard({ ticket }: { ticket: TicketListing }) {
   );
 }
 
-const ALL_TIERS = Array.from(new Set(TICKET_LISTINGS.map(t => t.tier)));
-const ALL_CITIES = Array.from(new Set(TICKET_LISTINGS.map(t => t.city)));
 const ALL_EVENTS = EVENTS;
 
 export default function Marketplace() {
@@ -144,7 +142,6 @@ export default function Marketplace() {
           .order("created_at", { ascending: false });
 
         if (error) {
-          // Fallback simple query without join if join fails
           const { data: rawData } = await supabase
             .from("tickets")
             .select("*")
@@ -205,7 +202,6 @@ export default function Marketplace() {
 
     fetchTickets();
 
-    // Subscribe to realtime ticket updates across all users
     const channel = supabase
       .channel("public-tickets-realtime")
       .on(
@@ -217,7 +213,6 @@ export default function Marketplace() {
       )
       .subscribe();
 
-    // Polling fallback every 5s
     const pollInterval = setInterval(fetchTickets, 5000);
 
     return () => {
@@ -226,14 +221,17 @@ export default function Marketplace() {
     };
   }, []);
 
-  // Kết hợp vé thật từ Supabase với dynamic listings và mock fallback (loại bỏ trùng ID)
-  const combined = [...supabaseTickets, ...dynamicMarketListings, ...TICKET_LISTINGS];
+  // LOẠI BỎ HOÀN TOÀN TICKET_LISTINGS MẪU: Chỉ kết hợp Supabase + dynamicMarketListings[cite: 19]
+  const combined = [...supabaseTickets, ...dynamicMarketListings];
   const seenIds = new Set<number>();
   const allListings = combined.filter(tk => {
     if (seenIds.has(tk.id)) return false;
     seenIds.add(tk.id);
     return true;
   });
+
+  const ALL_TIERS = Array.from(new Set(allListings.map(t => t.tier)));
+  const ALL_CITIES = Array.from(new Set(allListings.map(t => t.city)));
 
   const filtered = allListings
     .filter(tk => {

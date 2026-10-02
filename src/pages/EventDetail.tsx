@@ -1,20 +1,82 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../context";
-import { TICKET_LISTINGS } from "../data";
+import { supabase } from "../lib/supabaseClient";
+import type { TicketListing } from "../data";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 type TabId = "info" | "tickets" | "map";
 
 export default function EventDetail() {
-  const { selectedEvent, openCheckout, nav, isLoggedIn, setAuthModal } = useApp();
+  const { selectedEvent, openCheckout, nav, isLoggedIn, setAuthModal, dynamicMarketListings } = useApp();
   const [activeTab, setActiveTab] = useState<TabId>("tickets");
+  const [supabaseListings, setSupabaseListings] = useState<TicketListing[]>([]);
+
+  useEffect(() => {
+    if (!selectedEvent) return;
+
+    async function fetchEventTickets() {
+      try {
+        const { data, error } = await supabase
+          .from("tickets")
+          .select(`
+            *,
+            profiles (
+              id,
+              full_name,
+              email,
+              role,
+              avatar_url
+            )
+          `)
+          .eq("status", "available")
+          .ilike("event_name", `%${selectedEvent.title}%`);
+
+        if (!error && data) {
+          const mapped: TicketListing[] = data.map((item: any) => ({
+            id: Number(item.id),
+            eventId: selectedEvent.id,
+            eventTitle: item.event_name,
+            eventImage: item.event_image || selectedEvent.image,
+            eventDate: item.event_date || selectedEvent.date,
+            city: item.city || selectedEvent.city,
+            tier: item.tier || "Standard",
+            tierColor: "#A78BFA",
+            section: item.section || item.tier || "Khu vực chung",
+            seat: item.seat || "Tự do",
+            price: Number(item.price),
+            officialPrice: Number(item.price),
+            sellerName: item.profiles?.full_name || item.profiles?.email?.split("@")[0] || "Người bán chính chủ",
+            sellerScore: 5.0,
+            sellerReviews: 10,
+            verified: true,
+          }));
+          setSupabaseListings(mapped);
+        }
+      } catch (err) {
+        console.error("Lỗi tải vé sự kiện:", err);
+      }
+    }
+
+    fetchEventTickets();
+  }, [selectedEvent]);
 
   if (!selectedEvent) return null;
 
-  const listings = TICKET_LISTINGS.filter(t => t.eventId === selectedEvent.id);
+  // LOẠI BỎ HOÀN TOÀN TICKET_LISTINGS MẪU: Chỉ lấy vé từ Supabase và dynamicMarketListings phù hợp sự kiện này[cite: 17]
+  const combinedListings = [
+    ...supabaseListings,
+    ...dynamicMarketListings.filter(l => l.eventId === selectedEvent.id || l.eventTitle.toLowerCase().includes(selectedEvent.title.toLowerCase()))
+  ];
 
-  const handleBuy = (ticket: typeof TICKET_LISTINGS[0]) => {
+  const seenIds = new Set<number>();
+  const listings = combinedListings.filter(t => {
+    if (seenIds.has(t.id)) return false;
+    seenIds.add(t.id);
+    return true;
+  });
+
+  const handleBuy = (ticket: TicketListing) => {
     if (!isLoggedIn) { setAuthModal("login"); return; }
     openCheckout(ticket);
   };

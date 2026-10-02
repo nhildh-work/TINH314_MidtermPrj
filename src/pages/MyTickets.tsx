@@ -40,7 +40,6 @@ export default function MyTickets() {
     currentUser,
     currentProfile,
     t,
-    purchasedTickets: contextPurchasedTickets,
   } = useApp();
 
   const [checkedIn, setCheckedIn] = useState<Set<number>>(new Set<number>());
@@ -95,8 +94,8 @@ export default function MyTickets() {
     loadMyTransactions();
   }, [currentUser]);
 
-  // Chỉ lấy vé người dùng hiện tại thực sự đã mua (qua Supabase hoặc trong phiên làm việc)
-  const allTickets = [...contextPurchasedTickets, ...purchasedTickets];
+  // LOẠI BỎ HOÀN TOÀN DỮ LIỆU MẪU: Chỉ dùng dữ liệu thật từ Supabase
+  const allTickets = purchasedTickets;
 
   const buyerName = currentProfile?.full_name || (currentUser?.user_metadata as any)?.full_name || currentUser?.email || "Khách hàng SafePass";
   const buyerEmail = currentProfile?.email || currentUser?.email || "";
@@ -142,26 +141,17 @@ export default function MyTickets() {
 
             return (
               <div key={ticket.id} className="sp-card overflow-hidden transition-all duration-200 hover:border-purple-500/30">
-                {/* Top image strip */}
                 <div className="relative h-32 overflow-hidden">
                   <img src={ticket.eventImage} alt={ticket.eventTitle} className="w-full h-full object-cover" />
                   <div className="absolute inset-0" style={{ background: "linear-gradient(to right, rgba(13,13,30,0.96) 0%, rgba(13,13,30,0.6) 65%, transparent 100%)" }} />
                   <div className="absolute inset-0 flex items-center px-4 gap-4">
-                    {/* Mini QR that opens full Gate Pass */}
                     <MiniQR ticketId={ticket.id} onOpen={() => setSelectedTicketForPass(ticket)} />
-
-                    {/* Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span
-                          className="text-[10px] font-display font-800 px-2 py-0.5 rounded-full"
-                          style={{ color: cfg.color, background: cfg.bg }}
-                        >
+                        <span className="text-[10px] font-display font-800 px-2 py-0.5 rounded-full" style={{ color: cfg.color, background: cfg.bg }}>
                           {cfg.label}
                         </span>
-                        <span className="text-[10px] text-gray-400 font-mono">
-                          Mã vé: SP-{ticket.id.toString().padStart(6, "0")}
-                        </span>
+                        <span className="text-[10px] text-gray-400 font-mono">Mã vé: SP-{ticket.id.toString().padStart(6, "0")}</span>
                       </div>
                       <h3 className="font-display font-700 text-white text-base leading-snug line-clamp-1 mb-1">{ticket.eventTitle}</h3>
                       <p className="text-xs text-gray-300 flex items-center gap-2">
@@ -174,7 +164,6 @@ export default function MyTickets() {
                 </div>
 
                 <div className="p-4">
-                  {/* Details Grid */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 bg-white/[0.02] p-3 rounded-xl border border-white/5">
                     {[
                       { icon: "🎫", label: t.tierLabel2, val: ticket.tier },
@@ -192,7 +181,6 @@ export default function MyTickets() {
                     ))}
                   </div>
 
-                  {/* ── PRIMARY ACTION: OPEN TICKET PASS MODAL (QR & PDF) ── */}
                   <button
                     onClick={() => setSelectedTicketForPass(ticket)}
                     className="w-full py-3 px-4 rounded-xl font-display font-800 text-sm text-white transition-all shadow-lg flex items-center justify-center gap-2 mb-3"
@@ -206,12 +194,9 @@ export default function MyTickets() {
                     <span>Xem Vé Điện Tử & Mã Quét Cổng (QR / PDF)</span>
                   </button>
 
-                  {/* Actions for LOCKED (Pending Gate Check-in) tickets */}
                   {isLocked && (
                     <div className="space-y-2">
-                      <p className="text-xs text-center pb-1 text-gray-400">
-                        {t.checkinHint}
-                      </p>
+                      <p className="text-xs text-center pb-1 text-gray-400">{t.checkinHint}</p>
                       <button
                         onClick={() => setCheckedIn(prev => new Set([...prev, ticket.id]))}
                         className="w-full py-2.5 rounded-xl font-display font-700 text-xs text-white transition-all hover:opacity-95 flex items-center justify-center gap-1.5"
@@ -223,8 +208,6 @@ export default function MyTickets() {
                         onClick={() => { addReportedTicket(ticket.id); openDispute(ticket); }}
                         className="w-full py-2 rounded-xl font-display font-700 text-xs transition-all flex items-center justify-center gap-1.5"
                         style={{ color: "#F87171", border: "1px solid rgba(248,113,113,0.25)", background: "transparent" }}
-                        onMouseEnter={e => (e.currentTarget.style.background = "rgba(248,113,113,0.07)")}
-                        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                       >
                         {t.reportBtn}
                       </button>
@@ -255,7 +238,6 @@ export default function MyTickets() {
         </div>
       )}
 
-      {/* ── TICKET PASS FULL-SCREEN MODAL FOR GATE ENTRY ── */}
       <TicketPassModal
         ticket={selectedTicketForPass}
         isOpen={!!selectedTicketForPass}
@@ -264,13 +246,8 @@ export default function MyTickets() {
         buyerEmail={buyerEmail}
         isCheckedIn={selectedTicketForPass ? checkedIn.has(selectedTicketForPass.id) : false}
         isReported={selectedTicketForPass ? reportedTicketIds.includes(selectedTicketForPass.id) : false}
-        onConfirmCheckin={(id) => {
-          setCheckedIn(prev => new Set([...prev, id]));
-        }}
-        onReportIssue={(t) => {
-          addReportedTicket(t.id);
-          openDispute(t);
-        }}
+        onConfirmCheckin={(id) => setCheckedIn(prev => new Set([...prev, id]))}
+        onReportIssue={(t) => { addReportedTicket(t.id); openDispute(t); }}
       />
     </div>
   );
