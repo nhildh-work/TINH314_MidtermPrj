@@ -1,193 +1,301 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../context";
 import { supabase } from "../lib/supabaseClient";
 
-async function sendGmailNotification(toEmail: string, subject: string, bodyText: string) {
-  try {
-    await supabase.functions.invoke("send-dispute-email", {
-      body: { to: toEmail, subject, text: bodyText },
-    });
-  } catch (e) {
-    console.warn("Notice sending Gmail notification:", e);
-  }
+interface Dispute {
+  id: string;
+  ticketId: number;
+  eventTitle: string;
+  eventStartTime: string;
+  amount: number;
+  status: string;
+  buyerReason: string;
+  buyerDetail: string;
+  buyerVideo: string;
+  createdAt: string;
+  refundBankName?: string;
+  refundBankAccount?: string;
+  refundAccountHolder?: string;
+  sellerResponse?: string;
+  sellerVideo?: string;
+  resolution_notes?: string;
+  penalty_option?: string;
+  buyerId: string;
+  sellerId: string;
 }
 
-export default function Dispute() {
-  const { disputeTicket, closeDispute, nav, currentUser } = useApp();
-  const [reason, setReason] = useState("");
-  const [detail, setDetail] = useState("");
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [refundBankNum, setRefundBankNum] = useState("");
-  const [refundBankName, setRefundBankName] = useState("MB Bank");
-  const [refundBankHolder, setRefundBankHolder] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+export default function DisputeCenter() {
+  const { nav, role, currentUser, currentProfile } = useApp();
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
+  const [selectedDispute, setSelectedDispute] = useState<Dispute | null>(null);
+  const [sellerText, setSellerText] = useState("");
+  const [sellerVideoFile, setSellerVideoFile] = useState<File | null>(null);
+  const [uploadingSeller, setUploadingSeller] = useState(false);
 
-  const handleSubmit = async () => {
-    if (!reason || !videoFile || !refundBankNum.trim() || !refundBankHolder.trim() || !disputeTicket || !currentUser) return;
+  // State cho Dropdown Admin
+  const [adminPenalty, setAdminPenalty] = useState("buyer_win_no_penalty");
 
-    try {
-      setLoading(true);
+  const uid = currentUser?.id || currentProfile?.id;
+  const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
 
-      // 1. LẤY TRANSACTION_ID VÀ SELLER_ID ĐỂ MAP VÀO BẢNG DISPUTES
-      const { data: ticketData, error: ticketErr } = await supabase
-        .from("tickets")
-        .select("seller_id")
-        .eq("id", disputeTicket.id)
-        .single();
-        
-      const { data: txData, error: txErr } = await supabase
-        .from("transactions")
-        .select("id")
-        .eq("ticket_id", disputeTicket.id)
-        .eq("buyer_id", currentUser.id)
-        .eq("status", "paid")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+  const fetchDisputes = async () => {
+    if (!uid) return;
 
-      if (ticketErr || txErr || !txData) {
-        throw new Error("Không tìm thấy dữ liệu giao dịch hợp lệ. Vui lòng thử lại.");
-      }
+    const { data, error } = await supabase
+      .from("disputes")
+      .select("*, tickets(*)")
+      .order("created_at", { ascending: false });
 
-      // 2. TẢI VIDEO LÊN
-      const fileExt = videoFile.name.split('.').pop();
-      const fileName = `${disputeTicket.id}_${Date.now()}.${fileExt}`;
+    if (error) {
+      console.error("Lỗi fetch disputes:", error.message);
+      return;
+    }
 
-      const { error: uploadError } = await supabase.storage
-        .from('dispute-videos')
-        .upload(fileName, videoFile, { 
-          upsert: true,
-          contentType: videoFile.type 
-        });
+    if (data) {
+      const mapped: Dispute[] = data.map((d: any) => ({
+        id: String(d.id),
+        ticketId: d.ticket_id,
+        eventTitle: d.tickets?.event_name || "Vé Concert",
+        eventStartTime: d.tickets?.event_date || new Date().toISOString(),
+        amount: Number(d.tickets?.price || 0),
+        status: d.status,
+        buyerReason: d.reason,
+        buyerDetail: d.description || d.reason,
+        buyerVideo: d.evidence_url,
+        createdAt: d.created_at,
+        refundBankName: d.refund_bank_name,
+        refundBankAccount: d.refund_bank_account,
+        refundAccountHolder: d.refund_account_holder,
+        sellerResponse: d.seller_response,
+        sellerVideo: d.seller_evidence_url,
+        resolution_notes: d.resolution_notes,
+        penalty_option: d.penalty_option,
+        buyerId: String(d.buyer_id),
+        sellerId: String(d.seller_id), 
+      }));
 
-      if (uploadError) throw uploadError;
-
-      const { data: publicUrlData } = supabase.storage
-        .from('dispute-videos')
-        .getPublicUrl(fileName);
-
-      const actualVideoUrl = publicUrlData.publicUrl;
-
-      // 3. LƯU BẢN GHI (Sử dụng đúng tên cột DB: evidence_url)
-      const { error } = await supabase
-        .from("disputes")
-        .insert({
-          ticket_id: disputeTicket.id,
-          transaction_id: txData.id,
-          buyer_id: currentUser.id,
-          seller_id: ticketData.seller_id,
-          reason: reason,
-          description: detail.trim() || reason,
-          evidence_url: actualVideoUrl, // FIX: Đã đổi từ video_url thành evidence_url
-          refund_bank_name: refundBankName.trim(),
-          refund_bank_account: refundBankNum.trim(),
-          refund_account_holder: refundBankHolder.trim().toUpperCase(),
-          status: "pending_seller",
-          created_at: new Date().toISOString(),
-        });
-
-      if (error) throw error;
-
-      // 4. ĐÓNG BĂNG VÉ & GIAO DỊCH
-      await supabase
-        .from("tickets")
-        .update({ status: "disputed" })
-        .eq("id", disputeTicket.id);
-
-      await supabase
-        .from("transactions")
-        .update({ status: "disputed" })
-        .eq("id", txData.id);
-
-      if (currentUser.email) {
-        sendGmailNotification(
-          currentUser.email,
-          "🛡️ SafePass Escrow: Đã tiếp nhận khiếu nại vé #" + disputeTicket.id,
-          `Chào bạn, khiếu nại cho vé ${disputeTicket.eventTitle} đã được ghi nhận. Khoản thanh toán của vé này đã được đóng băng an toàn.`
-        );
-      }
-
-      setSubmitted(true);
-    } catch (err: any) {
-      alert("Lỗi khi gửi khiếu nại: " + err.message);
-    } finally {
-      setLoading(false);
+      setDisputes(mapped);
     }
   };
 
-  if (submitted) {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-24 text-center space-y-4">
-        <div className="text-6xl">🛡️</div>
-        <h2 className="font-display font-800 text-white text-2xl">Báo Cáo Đã ĐƯỢC GHI NHẬN</h2>
-        <p className="text-sm text-gray-300 leading-relaxed">
-          Khoản thanh toán của vé này đã bị đóng băng ĐỘC LẬP. Người bán đã nhận được thông báo qua Gmail và có hạn chót đối chất trước khi thời gian diễn ra sự kiện chính thức bắt đầu.
-        </p>
-        <button onClick={() => { closeDispute(); nav("dispute-center"); }} className="sp-btn-primary px-8 py-3 font-bold text-sm cursor-pointer shadow-lg">
-          Theo dõi tại Trung Tâm Tranh Chấp →
-        </button>
-      </div>
-    );
-  }
+  useEffect(() => {
+    fetchDisputes();
+    const channel = supabase
+      .channel("dispute_center_realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "disputes" }, () => fetchDisputes())
+      .subscribe();
 
-  // Phía dưới UI giữ nguyên...
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [uid]);
+
+  // LOGIC 3 MỨC PHẠT
+  const handleAdminRuling = async () => {
+    if (!selectedDispute) return;
+
+    let rulingMessage = "";
+    let finalStatus = "";
+    
+    // Tính toán tiền
+    const ticketPrice = selectedDispute.amount;
+    const penaltyAmount = ticketPrice * 0.05; // Phạt 5%
+    const totalBuyerReceivesWithPenalty = ticketPrice + penaltyAmount;
+
+    if (adminPenalty === "buyer_win_no_penalty") {
+      rulingMessage = `PHÁN QUYẾT: NGƯỜI MUA THẮNG (Lỗi Nhẹ). Hoàn 100% tiền vé (${ticketPrice.toLocaleString()} VND) cho Người Mua. Người Bán được hoàn trả lại tiền cọc (Không bị phạt).`;
+      finalStatus = "ruled_buyer_100";
+      await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
+
+    } else if (adminPenalty === "buyer_win_penalty") {
+      rulingMessage = `PHÁN QUYẾT: NGƯỜI MUA THẮNG (Lỗi Nặng). Hoàn vé + Bồi thường 5% tổng cộng (${totalBuyerReceivesWithPenalty.toLocaleString()} VND). Tiền bồi thường được cấn trừ trực tiếp từ cọc của Người Bán.`;
+      finalStatus = "ruled_buyer_105";
+      await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
+
+    } else if (adminPenalty === "seller_win") {
+      rulingMessage = `PHÁN QUYẾT: NGƯỜI BÁN THẮNG. Bằng chứng hợp lệ. Giải ngân 100% tiền vé + hoàn lại 25% cọc cho Người Bán.`;
+      finalStatus = "ruled_seller";
+      await supabase.from("tickets").update({ status: "completed" }).eq("id", selectedDispute.ticketId);
+    }
+
+    // Update DB
+    await supabase.from("disputes").update({ 
+      resolution_notes: rulingMessage, 
+      penalty_option: adminPenalty,
+      status: finalStatus,
+      resolved_at: new Date().toISOString()
+    }).eq("id", selectedDispute.id);
+    
+    alert("Đã ban hành phán quyết và áp dụng chính sách phạt thành công!");
+    fetchDisputes();
+    setSelectedDispute(null);
+  };
+
+  const handleSellerRespond = async () => {
+    if (!selectedDispute || !sellerText || !sellerVideoFile) return;
+
+    const now = new Date().getTime();
+    const eventTime = new Date(selectedDispute.eventStartTime).getTime();
+
+    if (now >= eventTime) {
+      alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
+      await supabase.from("disputes").update({
+        status: "final_buyer_autoloss",
+        resolution_notes: "TỰ ĐỘNG XỬ THUA: Người Bán không nộp đối chất trước thời gian sự kiện. Hoàn 100% tiền vé cho Người mua.",
+        resolved_at: new Date().toISOString()
+      }).eq("id", selectedDispute.id);
+      await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
+      fetchDisputes();
+      return;
+    }
+
+    try {
+      setUploadingSeller(true);
+
+      const fileExt = sellerVideoFile.name.split('.').pop();
+      const fileName = `seller_resp_${selectedDispute.id}_${Date.now()}.${fileExt}`;
+
+      const { error: upErr } = await supabase.storage
+        .from('dispute-videos')
+        .upload(fileName, sellerVideoFile, { 
+          upsert: true,
+          contentType: sellerVideoFile.type 
+        });
+
+      if (upErr) throw upErr;
+
+      const { data: pubUrl } = supabase.storage.from('dispute-videos').getPublicUrl(fileName);
+
+      await supabase.from("disputes").update({
+        seller_response: sellerText, 
+        seller_evidence_url: pubUrl.publicUrl, 
+        status: "under_review",
+      }).eq("id", selectedDispute.id);
+
+      alert("Nộp đối chất thành công! Chờ Admin duyệt phán quyết.");
+      fetchDisputes();
+    } catch (e: any) {
+      alert("Lỗi nộp đối chất: " + e.message);
+    } finally {
+      setUploadingSeller(false);
+    }
+  };
+
   return (
-    <div className="max-w-3xl mx-auto px-5 py-8 space-y-6">
+    <div className="max-w-[1680px] mx-auto px-5 py-8 space-y-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => { closeDispute(); nav("my-tickets"); }} className="sp-btn-ghost text-xs px-3 py-1.5 cursor-pointer">
+        <button onClick={() => nav("seller-dash")} className="sp-btn-ghost text-xs px-3 py-1.5 cursor-pointer">
           ← Quay lại
         </button>
-        <h1 className="font-display font-800 text-white text-xl">Khiếu Nại Sự Cố Cổng Vé & Đóng Băng Escrow</h1>
+        <h1 className="font-display font-800 text-white text-2xl">Trung Tâm Xử Lý Tranh Chấp SafePass</h1>
       </div>
 
-      <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-300 leading-relaxed">
-        🛡️ <strong>Chính sách Bảo vệ Tiền Ký Quỹ:</strong> Khi gửi khiếu nại, khoản thanh toán của vé này sẽ lập tức bị phong tỏa. Người bán chỉ có thời hạn đối chất trước khi thời gian sự kiện trên vé chính thức bắt đầu.
-      </div>
-      
-      <div className="sp-card p-6 space-y-4">
-        <div>
-          <label className="sp-filter-label mb-1.5 block">Loại sự cố *</label>
-          <select value={reason} onChange={e => setReason(e.target.value)} className="sp-select">
-            <option value="">Chọn loại sự cố</option>
-            <option value="Vé bị báo đã quét trước đó">Vé bị báo đã quét trước đó (Trùng mã)</option>
-            <option value="Mã QR không hợp lệ / Vé giả mạo">Mã QR không hợp lệ / Vé giả mạo</option>
-            <option value="Sai vị trí chỗ ngồi / Bị hủy vé">Sai vị trí chỗ ngồi / Bị hủy vé</option>
-          </select>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-3">
+          {disputes.length === 0 ? (
+            <div className="sp-card p-12 text-center text-gray-500 text-xs">Chưa có tranh chấp nào.</div>
+          ) : (
+            disputes.map(d => (
+              <div
+                key={d.id}
+                onClick={() => setSelectedDispute(d)}
+                className={`sp-card p-5 cursor-pointer hover:border-purple-500/50 transition-all ${selectedDispute?.id === d.id ? 'border-purple-500 bg-purple-500/5' : ''}`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <span className="font-bold text-white text-sm">#{d.id} - {d.eventTitle}</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">
+                    {d.status}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400">Lý do: {d.buyerReason}</p>
+              </div>
+            ))
+          )}
         </div>
 
-        <div>
-          <label className="sp-filter-label mb-1.5 block">Mô tả chi tiết sự cố tại cổng vé</label>
-          <textarea rows={3} value={detail} onChange={e => setDetail(e.target.value)} className="sp-input" placeholder="Nêu rõ tình huống lúc quét mã..." />
-        </div>
+        {selectedDispute ? (
+          <div className="sp-card p-6 space-y-5">
+            <h2 className="font-display font-800 text-white text-lg">Chi Tiết Tranh Chấp #{selectedDispute.id}</h2>
+            
+            <div className="p-4 bg-black/40 rounded-xl text-xs space-y-2 border border-white/5">
+              <p className="text-gray-300">Sự kiện: <strong>{selectedDispute.eventTitle}</strong></p>
+              <p className="text-gray-300">Giá trị vé: <strong className="text-emerald-400">{selectedDispute.amount.toLocaleString()} VND</strong></p>
+              <p className="text-gray-300">Lý do Người Mua: <strong className="text-red-400">{selectedDispute.buyerReason}</strong></p>
+              <p className="text-gray-300">Mô tả chi tiết: {selectedDispute.buyerDetail}</p>
+              
+              {selectedDispute.buyerVideo && (
+                <div className="pt-2">
+                  <p className="text-gray-400 mb-1 font-bold">🎥 Video bằng chứng của Người Mua:</p>
+                  {selectedDispute.buyerVideo.startsWith("http") ? (
+                    <video src={selectedDispute.buyerVideo} controls className="w-full rounded-xl bg-black max-h-60" />
+                  ) : (
+                    <p className="text-blue-400 font-bold">{selectedDispute.buyerVideo}</p>
+                  )}
+                </div>
+              )}
+            </div>
 
-        <div>
-          <label className="sp-filter-label mb-1.5 block">Video bằng chứng thực tế tại cổng (Bắt buộc) *</label>
-          <input type="file" accept="video/*" onChange={e => e.target.files?.[0] && setVideoFile(e.target.files[0])} className="sp-input" />
-        </div>
+            {(String(selectedDispute.sellerId) === String(uid) || isAdmin) && selectedDispute.status === "pending_seller" && (
+              <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl space-y-3">
+                <p className="font-bold text-purple-300 text-xs">📤 Người Bán Nộp Đối Chất (Hạn chót: Trước thời gian sự kiện)</p>
+                <textarea rows={3} value={sellerText} onChange={e => setSellerText(e.target.value)} placeholder="Nhập lý do đối chất..." className="sp-input" />
+                <input type="file" accept="video/*" onChange={e => e.target.files?.[0] && setSellerVideoFile(e.target.files[0])} className="sp-input" />
+                <button onClick={handleSellerRespond} disabled={uploadingSeller} className="w-full sp-btn-primary py-2.5 font-bold text-xs cursor-pointer disabled:opacity-50">
+                  {uploadingSeller ? "Đang tải bằng chứng lên..." : "Nộp bằng chứng đối chất ngay →"}
+                </button>
+              </div>
+            )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-          <div>
-            <label className="sp-filter-label mb-1 block">Ngân hàng hoàn tiền *</label>
-            <input placeholder="MB Bank, VCB..." value={refundBankName} onChange={e => setRefundBankName(e.target.value)} className="sp-input text-xs" />
+            {selectedDispute.sellerResponse && (
+              <div className="p-4 bg-purple-500/10 rounded-xl text-xs space-y-2 border border-purple-500/20">
+                <p className="font-bold text-purple-300">Bằng chứng đối chất của Người bán:</p>
+                <p className="text-gray-200">{selectedDispute.sellerResponse}</p>
+                {selectedDispute.sellerVideo?.startsWith("http") ? (
+                  <video src={selectedDispute.sellerVideo} controls className="w-full rounded-xl bg-black max-h-60" />
+                ) : (
+                  <p className="text-blue-400 font-bold">🎥 {selectedDispute.sellerVideo}</p>
+                )}
+              </div>
+            )}
+
+            {selectedDispute.resolution_notes && (
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 leading-relaxed font-bold">
+                ⚖️ {selectedDispute.resolution_notes}
+              </div>
+            )}
+
+            {/* KHU VỰC ADMIN - CÓ SELECT BOX 3 OPTION PHẠT */}
+            {isAdmin && selectedDispute.status !== "ruled_buyer_100" && selectedDispute.status !== "ruled_buyer_105" && selectedDispute.status !== "ruled_seller" && (
+              <div className="pt-4 border-t border-white/10 space-y-4">
+                <p className="font-bold text-amber-400 text-xs">⚖️ Bảng Điều Khiển Phán Quyết (Admin):</p>
+                
+                <div>
+                  <label className="sp-filter-label mb-2 block">Chọn mức độ xử phạt Escrow:</label>
+                  <select 
+                    value={adminPenalty} 
+                    onChange={(e) => setAdminPenalty(e.target.value)} 
+                    className="sp-select w-full"
+                  >
+                    <option value="buyer_win_no_penalty">1. Người Mua thắng (Hoàn 100% vé - Trả cọc cho Người Bán)</option>
+                    <option value="buyer_win_penalty">2. Người Mua thắng (Hoàn vé + Bồi thường 5% từ cọc Người Bán)</option>
+                    <option value="seller_win">3. Người Bán thắng (Giải ngân tiền vé + Hoàn 25% cọc)</option>
+                  </select>
+                </div>
+
+                <button
+                  onClick={handleAdminRuling}
+                  className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-display font-800 text-sm rounded-xl cursor-pointer transition-all"
+                >
+                  XÁC NHẬN PHÁN QUYẾT TỪ ADMIN
+                </button>
+              </div>
+            )}
           </div>
-          <div>
-            <label className="sp-filter-label mb-1 block">Số tài khoản *</label>
-            <input placeholder="Nhập số TK" value={refundBankNum} onChange={e => setRefundBankNum(e.target.value)} className="sp-input text-xs font-mono" />
+        ) : (
+          <div className="sp-card p-12 text-center text-gray-500 text-xs">
+            Chọn 1 đơn tranh chấp bên trái để xem chi tiết.
           </div>
-          <div>
-            <label className="sp-filter-label mb-1 block">Chủ tài khoản *</label>
-            <input placeholder="VD: NGUYEN VAN A" value={refundBankHolder} onChange={e => setRefundBankHolder(e.target.value)} className="sp-input text-xs uppercase font-bold" />
-          </div>
-        </div>
-
-        <button
-          onClick={handleSubmit}
-          disabled={loading || !reason || !videoFile || !refundBankNum.trim() || !refundBankHolder.trim()}
-          className="w-full sp-btn-primary py-3.5 font-bold text-sm cursor-pointer disabled:opacity-40"
-        >
-          {loading ? "Đang tải video & gửi báo cáo..." : "Gửi Báo Cáo & Phong Tỏa Khoản Thanh Toán Vé Này →"}
-        </button>
+        )}
       </div>
     </div>
   );
