@@ -19,8 +19,6 @@ interface Dispute {
   sellerResponse?: string;
   sellerVideo?: string;
   ruling?: string;
-  buyerAppeal?: any;
-  sellerAppeal?: any;
 }
 
 export default function DisputeCenter() {
@@ -28,7 +26,8 @@ export default function DisputeCenter() {
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [selectedDispute, setSelectedDispute] = useState<Dispute | null>(null);
   const [sellerText, setSellerText] = useState("");
-  const [sellerVideo, setSellerVideo] = useState<File | null>(null);
+  const [sellerVideoFile, setSellerVideoFile] = useState<File | null>(null);
+  const [uploadingSeller, setUploadingSeller] = useState(false);
 
   const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
   const isSeller = role === "seller";
@@ -39,7 +38,7 @@ export default function DisputeCenter() {
 
     let query = supabase.from("disputes").select("*, tickets(*)");
 
-    // NẾU KHÔNG PHẢI ADMIN: Chỉ lấy đơn tranh chấp có buyer_id hoặc seller_id khớp với user đang đăng nhập
+    // Lọc đúng dữ liệu của User đang đăng nhập
     if (!isAdmin) {
       query = query.or(`buyer_id.eq.${uid},seller_id.eq.${uid}`);
     }
@@ -64,8 +63,6 @@ export default function DisputeCenter() {
         sellerResponse: d.seller_response,
         sellerVideo: d.seller_video,
         ruling: d.ruling,
-        buyerAppeal: d.buyer_appeal,
-        sellerAppeal: d.seller_appeal,
       }));
       setDisputes(mapped);
     }
@@ -86,7 +83,7 @@ export default function DisputeCenter() {
     };
   }, [uid]);
 
-  // HÀM ADMIN RA PHÁN QUYẾT TỰ ĐỘNG CĂN CỨ THEO THỜI GIAN
+  // PHÁN QUYẾT ADMIN
   const handleAdminRuling = async (winner: "buyer" | "seller") => {
     if (!selectedDispute) return;
 
@@ -125,14 +122,13 @@ export default function DisputeCenter() {
     setSelectedDispute(null);
   };
 
-  // NGƯỜI BÁN NỘP ĐỐI CHẤT
+  // NGƯỜI BÁN NỘP BẰNG CHỨNG ĐỐI CHẤT
   const handleSellerRespond = async () => {
-    if (!selectedDispute || !sellerText || !sellerVideo) return;
+    if (!selectedDispute || !sellerText || !sellerVideoFile) return;
 
     const now = new Date().getTime();
     const eventTime = new Date(selectedDispute.eventStartTime).getTime();
 
-    // QUÁ GIỜ BẮT ĐẦU SỰ KIỆN: TỰ ĐỘNG XỬ THUA
     if (now >= eventTime) {
       alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
 
@@ -146,15 +142,34 @@ export default function DisputeCenter() {
       return;
     }
 
-    // Nộp đối chất thành công
-    await supabase.from("disputes").update({
-      seller_response: sellerText,
-      seller_video: sellerVideo.name,
-      status: "under_review",
-    }).eq("id", selectedDispute.id);
+    try {
+      setUploadingSeller(true);
 
-    alert("Nộp đối chất thành công! Chờ Admin duyệt phán quyết.");
-    fetchDisputes();
+      // Upload video đối chất của Seller lên Storage
+      const fileExt = sellerVideoFile.name.split('.').pop();
+      const fileName = `seller_resp_${selectedDispute.id}_${Date.now()}.${fileExt}`;
+
+      const { error: upErr } = await supabase.storage
+        .from('dispute-videos')
+        .upload(fileName, sellerVideoFile, { upsert: true });
+
+      if (upErr) throw upErr;
+
+      const { data: pubUrl } = supabase.storage.from('dispute-videos').getPublicUrl(fileName);
+
+      await supabase.from("disputes").update({
+        seller_response: sellerText,
+        seller_video: pubUrl.publicUrl,
+        status: "under_review",
+      }).eq("id", selectedDispute.id);
+
+      alert("Nộp đối chất thành công! Chờ Admin duyệt phán quyết.");
+      fetchDisputes();
+    } catch (e: any) {
+      alert("Lỗi nộp đối chất: " + e.message);
+    } finally {
+      setUploadingSeller(false);
+    }
   };
 
   return (
@@ -176,7 +191,7 @@ export default function DisputeCenter() {
               <div
                 key={d.id}
                 onClick={() => setSelectedDispute(d)}
-                className="sp-card p-5 cursor-pointer hover:border-purple-500/50 transition-all"
+                className={`sp-card p-5 cursor-pointer hover:border-purple-500/50 transition-all ${selectedDispute?.id === d.id ? 'border-purple-500 bg-purple-500/5' : ''}`}
               >
                 <div className="flex justify-between items-start mb-2">
                   <span className="font-bold text-white text-sm">#{d.id} - {d.eventTitle}</span>
@@ -195,14 +210,26 @@ export default function DisputeCenter() {
           <div className="sp-card p-6 space-y-5">
             <h2 className="font-display font-800 text-white text-lg">Chi Tiết Tranh Chấp #{selectedDispute.id}</h2>
             
-            <div className="p-3.5 bg-black/40 rounded-xl text-xs space-y-1.5 border border-white/5">
+            <div className="p-4 bg-black/40 rounded-xl text-xs space-y-2 border border-white/5">
               <p className="text-gray-300">Sự kiện: <strong>{selectedDispute.eventTitle}</strong></p>
               <p className="text-gray-300">Giá trị vé: <strong className="text-emerald-400">{selectedDispute.amount.toLocaleString()} VND</strong></p>
               <p className="text-gray-300">Lý do Người Mua: <strong className="text-red-400">{selectedDispute.buyerReason}</strong></p>
-              <p className="text-gray-300">Mô tả: {selectedDispute.buyerDetail}</p>
-              <p className="text-gray-300">Video bằng chứng: <span className="text-blue-400 font-bold">{selectedDispute.buyerVideo}</span></p>
+              <p className="text-gray-300">Mô tả chi tiết: {selectedDispute.buyerDetail}</p>
+              
+              {/* VIDEO BẰNG CHỨNG NGƯỜI MUA */}
+              {selectedDispute.buyerVideo && (
+                <div className="pt-2">
+                  <p className="text-gray-400 mb-1 font-bold">🎥 Video bằng chứng của Người Mua:</p>
+                  {selectedDispute.buyerVideo.startsWith("http") ? (
+                    <video src={selectedDispute.buyerVideo} controls className="w-full rounded-xl bg-black max-h-60" />
+                  ) : (
+                    <p className="text-blue-400 font-bold">{selectedDispute.buyerVideo}</p>
+                  )}
+                </div>
+              )}
+
               {selectedDispute.refundBankAccount && (
-                <p className="text-purple-300 pt-1 border-t border-white/5 font-mono">
+                <p className="text-purple-300 pt-2 border-t border-white/5 font-mono">
                   🏦 TK Nhận Hoàn Tiền: {selectedDispute.refundBankName} - {selectedDispute.refundBankAccount} ({selectedDispute.refundAccountHolder})
                 </p>
               )}
@@ -213,19 +240,23 @@ export default function DisputeCenter() {
               <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl space-y-3">
                 <p className="font-bold text-purple-300 text-xs">📤 Người Bán Nộp Đối Chất (Hạn chót: Trước thời gian sự kiện)</p>
                 <textarea rows={3} value={sellerText} onChange={e => setSellerText(e.target.value)} placeholder="Nhập lý do đối chất..." className="sp-input" />
-                <input type="file" accept="video/*" onChange={e => e.target.files?.[0] && setSellerVideo(e.target.files[0])} className="sp-input" />
-                <button onClick={handleSellerRespond} className="w-full sp-btn-primary py-2.5 font-bold text-xs cursor-pointer">
-                  Nộp bằng chứng đối chất ngay →
+                <input type="file" accept="video/*" onChange={e => e.target.files?.[0] && setSellerVideoFile(e.target.files[0])} className="sp-input" />
+                <button onClick={handleSellerRespond} disabled={uploadingSeller} className="w-full sp-btn-primary py-2.5 font-bold text-xs cursor-pointer disabled:opacity-50">
+                  {uploadingSeller ? "Đang tải bằng chứng lên..." : "Nộp bằng chứng đối chất ngay →"}
                 </button>
               </div>
             )}
 
             {/* BẰNG CHỨNG NGƯỜI BÁN ĐÃ NỘP */}
             {selectedDispute.sellerResponse && (
-              <div className="p-3.5 bg-purple-500/10 rounded-xl text-xs space-y-1 border border-purple-500/20">
+              <div className="p-4 bg-purple-500/10 rounded-xl text-xs space-y-2 border border-purple-500/20">
                 <p className="font-bold text-purple-300">Bằng chứng đối chất của Người bán:</p>
                 <p className="text-gray-200">{selectedDispute.sellerResponse}</p>
-                <p className="text-blue-400 font-bold">🎥 {selectedDispute.sellerVideo}</p>
+                {selectedDispute.sellerVideo?.startsWith("http") ? (
+                  <video src={selectedDispute.sellerVideo} controls className="w-full rounded-xl bg-black max-h-60" />
+                ) : (
+                  <p className="text-blue-400 font-bold">🎥 {selectedDispute.sellerVideo}</p>
+                )}
               </div>
             )}
 

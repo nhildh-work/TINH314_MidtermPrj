@@ -29,7 +29,24 @@ export default function Dispute() {
     try {
       setLoading(true);
 
-      // TỰ ĐỘNG TÌM SELLER_ID NẾU CHƯA CÓ TRONG TICKET OBJECT
+      // 1. UPLOAD VIDEO LÊN SUPABASE STORAGE BUCKET 'dispute-videos'
+      const fileExt = videoFile.name.split('.').pop();
+      const fileName = `${disputeTicket.id}_${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('dispute-videos')
+        .upload(fileName, videoFile, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // Lấy đường dẫn Public URL của video
+      const { data: publicUrlData } = supabase.storage
+        .from('dispute-videos')
+        .getPublicUrl(fileName);
+
+      const actualVideoUrl = publicUrlData.publicUrl;
+
+      // 2. TÌM SELLER_ID CỦA VÉ NẾU CHƯA CÓ TRONG DỮ LIỆU
       let targetSellerId = (disputeTicket as any).seller_id || (disputeTicket as any).sellerId;
       if (!targetSellerId && disputeTicket.id) {
         const { data: tk } = await supabase
@@ -40,7 +57,7 @@ export default function Dispute() {
         if (tk?.seller_id) targetSellerId = tk.seller_id;
       }
 
-      // 1. Lưu hồ sơ khiếu nại lên Supabase (Gửi chuẩn các cột riêng)
+      // 3. LƯU HỒ SƠ KHAN CAP LÊN TABLE 'disputes' WITH PUBLIC URL
       const { error } = await supabase
         .from("disputes")
         .insert({
@@ -49,7 +66,7 @@ export default function Dispute() {
           seller_id: targetSellerId || null,
           reason: reason,
           description: detail.trim() || reason,
-          video_url: videoFile ? videoFile.name : null,
+          video_url: actualVideoUrl, // Lưu link URL công khai dạng https://...
           refund_bank_name: refundBankName.trim(),
           refund_bank_account: refundBankNum.trim(),
           refund_account_holder: refundBankHolder.trim().toUpperCase(),
@@ -59,13 +76,13 @@ export default function Dispute() {
 
       if (error) throw error;
 
-      // 2. Chuyển trạng thái vé sang 'disputed' để đóng băng KHOẢN THANH TOÁN VÉ NÀY
+      // 4. KHÓA TỰ ĐỘNG TIỀN VÉ NÀY (ĐỔI TRẠNG THÁI VÉ SANG 'disputed')
       await supabase
         .from("tickets")
         .update({ status: "disputed" })
         .eq("id", disputeTicket.id);
 
-      // 3. Bắn Gmail thông báo cho Người mua
+      // 5. GỬI EMAIL THÔNG BÁO CHO BÊN MUA
       if (currentUser.email) {
         sendGmailNotification(
           currentUser.email,
@@ -151,7 +168,7 @@ export default function Dispute() {
           disabled={loading || !reason || !videoFile || !refundBankNum.trim() || !refundBankHolder.trim()}
           className="w-full sp-btn-primary py-3.5 font-bold text-sm cursor-pointer disabled:opacity-40"
         >
-          {loading ? "Đang gửi báo cáo..." : "Gửi Báo Cáo & Phong Tỏa Khoản Thanh Toán Vé Này →"}
+          {loading ? "Đang tải video & gửi báo cáo..." : "Gửi Báo Cáo & Phong Tỏa Khoản Thanh Toán Vé Này →"}
         </button>
       </div>
     </div>
