@@ -114,7 +114,7 @@ export default function DisputeCenter() {
       finalStatus = "ruled_seller";
       ticketNewStatus = "completed";
 
-      // TỰ ĐỘNG CỘNG TIỀN VÀO SỐ DƯ (BALANCE) CỦA NGƯỜI BÁN
+      // Tự động cộng tiền vào số dư (balance) của người bán
       const { data: sellerProfile } = await supabase
         .from("profiles")
         .select("balance")
@@ -124,24 +124,42 @@ export default function DisputeCenter() {
       const currentBal = Number(sellerProfile?.balance || 0);
       const payoutAmount = Math.round(ticketPrice * 0.95); // Trừ 5% phí nền tảng
 
-      await supabase
+      const { error: profileErr } = await supabase
         .from("profiles")
         .update({ balance: currentBal + payoutAmount })
         .eq("id", selectedDispute.sellerId);
+
+      if (profileErr) {
+        alert("Lỗi cộng tiền cho người bán: " + profileErr.message);
+        return;
+      }
     }
 
-    // Cập nhật trạng thái vé
-    await supabase.from("tickets").update({ status: ticketNewStatus }).eq("id", selectedDispute.ticketId);
+    // Cập nhật trạng thái vé và bắt lỗi Supabase
+    const { error: ticketErr } = await supabase
+      .from("tickets")
+      .update({ status: ticketNewStatus })
+      .eq("id", selectedDispute.ticketId);
+
+    if (ticketErr) {
+      alert("❌ Lỗi cập nhật vé (Do RLS Supabase chặn): " + ticketErr.message);
+      return;
+    }
 
     // Cập nhật trạng thái tranh chấp
-    await supabase.from("disputes").update({ 
+    const { error: disputeErr } = await supabase.from("disputes").update({ 
       resolution_notes: rulingMessage, 
       penalty_option: adminPenalty,
       status: finalStatus,
       resolved_at: new Date().toISOString()
     }).eq("id", selectedDispute.id);
+
+    if (disputeErr) {
+      alert("❌ Lỗi cập nhật tranh chấp: " + disputeErr.message);
+      return;
+    }
     
-    alert("Đã ban hành phán quyết, giải ngân tiền cho người bán và cập nhật trạng thái thành công!");
+    alert("✅ Đã ban hành phán quyết, giải ngân tiền và cập nhật trạng thái thành công!");
     fetchDisputes();
     setSelectedDispute(null);
   };
