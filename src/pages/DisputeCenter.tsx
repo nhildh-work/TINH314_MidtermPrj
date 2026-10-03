@@ -113,11 +113,27 @@ export default function DisputeCenter() {
       rulingMessage = `PHÁN QUYẾT: NGƯỜI BÁN THẮNG. Bằng chứng hợp lệ. Giải ngân 100% tiền vé + hoàn lại 25% cọc cho Người Bán.`;
       finalStatus = "ruled_seller";
       ticketNewStatus = "completed";
+
+      // TỰ ĐỘNG CỘNG TIỀN VÀO SỐ DƯ (BALANCE) CỦA NGƯỜI BÁN
+      const { data: sellerProfile } = await supabase
+        .from("profiles")
+        .select("balance")
+        .eq("id", selectedDispute.sellerId)
+        .single();
+
+      const currentBal = Number(sellerProfile?.balance || 0);
+      const payoutAmount = Math.round(ticketPrice * 0.95); // Trừ 5% phí nền tảng
+
+      await supabase
+        .from("profiles")
+        .update({ balance: currentBal + payoutAmount })
+        .eq("id", selectedDispute.sellerId);
     }
 
-    // Cập nhật trạng thái vé để đổi dòng tiền và trạng thái hiển thị bên người bán
+    // Cập nhật trạng thái vé
     await supabase.from("tickets").update({ status: ticketNewStatus }).eq("id", selectedDispute.ticketId);
 
+    // Cập nhật trạng thái tranh chấp
     await supabase.from("disputes").update({ 
       resolution_notes: rulingMessage, 
       penalty_option: adminPenalty,
@@ -125,7 +141,7 @@ export default function DisputeCenter() {
       resolved_at: new Date().toISOString()
     }).eq("id", selectedDispute.id);
     
-    alert("Đã ban hành phán quyết và áp dụng chính sách phạt thành công!");
+    alert("Đã ban hành phán quyết, giải ngân tiền cho người bán và cập nhật trạng thái thành công!");
     fetchDisputes();
     setSelectedDispute(null);
   };
@@ -221,7 +237,6 @@ export default function DisputeCenter() {
               <p className="text-gray-300">Lý do Người Mua: <strong className="text-red-400">{selectedDispute.buyerReason}</strong></p>
               <p className="text-gray-300">Mô tả chi tiết: {selectedDispute.buyerDetail}</p>
               
-              {/* VIDEO BẰNG CHỨNG CỦA NGƯỜI MUA (HIỂN THỊ TRỰC TIẾP) */}
               {selectedDispute.buyerVideo && (
                 <div className="pt-2">
                   <p className="text-gray-400 mb-1 font-bold">🎥 Video bằng chứng của Người Mua:</p>
@@ -235,7 +250,6 @@ export default function DisputeCenter() {
               )}
             </div>
 
-            {/* FORM NỘP ĐỐI CHẤT CHO NGƯỜI BÁN */}
             {(String(selectedDispute.sellerId) === String(uid) || isAdmin) && selectedDispute.status === "pending_seller" && (
               <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl space-y-3">
                 <p className="font-bold text-purple-300 text-xs">📤 Người Bán Nộp Đối Chất (Hạn chót: Trước thời gian sự kiện)</p>
@@ -247,7 +261,6 @@ export default function DisputeCenter() {
               </div>
             )}
 
-            {/* HIỂN THỊ ĐỐI CHẤT & VIDEO CỦA NGƯỜI BÁN */}
             {selectedDispute.sellerResponse && (
               <div className="p-4 bg-purple-500/10 rounded-xl text-xs space-y-2 border border-purple-500/20">
                 <p className="font-bold text-purple-300">Bằng chứng đối chất của Người bán:</p>
@@ -270,7 +283,6 @@ export default function DisputeCenter() {
               </div>
             )}
 
-            {/* BẢNG ĐIỀU KHIỂN PHÁN QUYẾT ADMIN */}
             {isAdmin && selectedDispute.status !== "ruled_buyer_100" && selectedDispute.status !== "ruled_buyer_105" && selectedDispute.status !== "ruled_seller" && (
               <div className="pt-4 border-t border-white/10 space-y-4">
                 <p className="font-bold text-amber-400 text-xs">⚖️ Bảng Điều Khiển Phán Quyết (Admin):</p>

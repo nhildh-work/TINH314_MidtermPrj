@@ -5,7 +5,6 @@ import { supabase } from "../lib/supabaseClient";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
-// BẢNG CẤU HÌNH TRẠNG THÁI CHUẨN (ĐÃ BỔ SUNG REFUNDED)
 const STATUS_CFG = {
   pending_deposit: { label: "⏳ CHỜ ĐÓNG CỌC (25%)", color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
   available:       { label: "🟢 ĐANG MỞ BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
@@ -16,7 +15,6 @@ const STATUS_CFG = {
   refunded:        { label: "❌ ĐÃ HOÀN TIỀN (NGƯỜI MUA THẮNG)", color: "#9CA3AF", bg: "rgba(156,163,175,0.15)" },
 } as const;
 
-// POPUP YÊU CẦU RÚT TIỀN
 function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => void }) {
   const { currentProfile, refreshProfile } = useApp();
   const [bank, setBank] = useState(currentProfile?.bank_name || "Vietcombank");
@@ -173,7 +171,6 @@ function WithdrawModal({ balance, onClose }: { balance: number; onClose: () => v
   );
 }
 
-// POPUP CHI TIẾT VÉ & NÚT ĐÓNG CỌC MỞ BÁN
 function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onClose: () => void; onDeleted: (id: number) => void }) {
   const { openCheckout, currentProfile, refreshProfile } = useApp();
   const cfg = STATUS_CFG[listing.status as keyof typeof STATUS_CFG] || STATUS_CFG.available;
@@ -384,8 +381,10 @@ export default function SellerDash() {
           .order("created_at", { ascending: false });
 
         if (disData) {
+          // CHỈ LẤY CÁC ĐƠN ĐANG TRANG CHẤP (CHƯA XỬ LÝ) ĐỂ HIỂN THỊ CẢNH BÁO ĐỎ
           const sellerDisputesFiltered = disData.filter((d: any) =>
-            String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid)
+            (String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid)) &&
+            (d.status === "pending_seller" || d.status === "under_review")
           );
           setSellerDisputes(sellerDisputesFiltered);
         }
