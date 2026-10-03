@@ -381,7 +381,6 @@ export default function SellerDash() {
           .order("created_at", { ascending: false });
 
         if (disData) {
-          // CHỈ LẤY CÁC ĐƠN ĐANG TRANG CHẤP (CHƯA XỬ LÝ) ĐỂ HIỂN THỊ CẢNH BÁO ĐỎ
           const sellerDisputesFiltered = disData.filter((d: any) =>
             (String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid)) &&
             (d.status === "pending_seller" || d.status === "under_review")

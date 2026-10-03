@@ -114,7 +114,7 @@ export default function DisputeCenter() {
       finalStatus = "ruled_seller";
       ticketNewStatus = "completed";
 
-      // Tự động cộng tiền vào số dư (balance) của người bán
+      // Tự động cộng tiền giải ngân vào balance của người bán (trừ 5% phí nền tảng)
       const { data: sellerProfile } = await supabase
         .from("profiles")
         .select("balance")
@@ -122,7 +122,7 @@ export default function DisputeCenter() {
         .single();
 
       const currentBal = Number(sellerProfile?.balance || 0);
-      const payoutAmount = Math.round(ticketPrice * 0.95); // Trừ 5% phí nền tảng
+      const payoutAmount = Math.round(ticketPrice * 0.95);
 
       const { error: profileErr } = await supabase
         .from("profiles")
@@ -135,18 +135,18 @@ export default function DisputeCenter() {
       }
     }
 
-    // Cập nhật trạng thái vé và bắt lỗi Supabase
+    // Cập nhật trạng thái bảng tickets
     const { error: ticketErr } = await supabase
       .from("tickets")
       .update({ status: ticketNewStatus })
       .eq("id", selectedDispute.ticketId);
 
     if (ticketErr) {
-      alert("❌ Lỗi cập nhật vé (Do RLS Supabase chặn): " + ticketErr.message);
+      alert("Lỗi cập nhật trạng thái vé: " + ticketErr.message);
       return;
     }
 
-    // Cập nhật trạng thái tranh chấp
+    // Cập nhật bảng disputes
     const { error: disputeErr } = await supabase.from("disputes").update({ 
       resolution_notes: rulingMessage, 
       penalty_option: adminPenalty,
@@ -155,7 +155,7 @@ export default function DisputeCenter() {
     }).eq("id", selectedDispute.id);
 
     if (disputeErr) {
-      alert("❌ Lỗi cập nhật tranh chấp: " + disputeErr.message);
+      alert("Lỗi cập nhật tranh chấp: " + disputeErr.message);
       return;
     }
     
