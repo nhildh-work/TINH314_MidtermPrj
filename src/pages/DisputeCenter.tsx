@@ -93,6 +93,7 @@ export default function DisputeCenter() {
 
     let rulingMessage = "";
     let finalStatus = "";
+    let ticketNewStatus = "";
     
     const ticketPrice = selectedDispute.amount;
     const penaltyAmount = ticketPrice * 0.05; 
@@ -101,18 +102,21 @@ export default function DisputeCenter() {
     if (adminPenalty === "buyer_win_no_penalty") {
       rulingMessage = `PHÁN QUYẾT: NGƯỜI MUA THẮNG (Lỗi Nhẹ). Hoàn 100% tiền vé (${ticketPrice.toLocaleString()} VND) cho Người Mua. Trả cọc cho Người Bán.`;
       finalStatus = "ruled_buyer_100";
-      await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
+      ticketNewStatus = "refunded";
 
     } else if (adminPenalty === "buyer_win_penalty") {
       rulingMessage = `PHÁN QUYẾT: NGƯỜI MUA THẮNG (Lỗi Nặng). Hoàn vé + Bồi thường 5% tổng cộng (${totalBuyerReceivesWithPenalty.toLocaleString()} VND). Phạt cấn trừ trực tiếp vào cọc của Người Bán.`;
       finalStatus = "ruled_buyer_105";
-      await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
+      ticketNewStatus = "refunded";
 
     } else if (adminPenalty === "seller_win") {
       rulingMessage = `PHÁN QUYẾT: NGƯỜI BÁN THẮNG. Bằng chứng hợp lệ. Giải ngân 100% tiền vé + hoàn lại 25% cọc cho Người Bán.`;
       finalStatus = "ruled_seller";
-      await supabase.from("tickets").update({ status: "completed" }).eq("id", selectedDispute.ticketId);
+      ticketNewStatus = "completed";
     }
+
+    // Cập nhật trạng thái vé để đổi dòng tiền và trạng thái hiển thị bên người bán
+    await supabase.from("tickets").update({ status: ticketNewStatus }).eq("id", selectedDispute.ticketId);
 
     await supabase.from("disputes").update({ 
       resolution_notes: rulingMessage, 
@@ -217,18 +221,21 @@ export default function DisputeCenter() {
               <p className="text-gray-300">Lý do Người Mua: <strong className="text-red-400">{selectedDispute.buyerReason}</strong></p>
               <p className="text-gray-300">Mô tả chi tiết: {selectedDispute.buyerDetail}</p>
               
+              {/* VIDEO BẰNG CHỨNG CỦA NGƯỜI MUA (HIỂN THỊ TRỰC TIẾP) */}
               {selectedDispute.buyerVideo && (
                 <div className="pt-2">
                   <p className="text-gray-400 mb-1 font-bold">🎥 Video bằng chứng của Người Mua:</p>
-                  {selectedDispute.buyerVideo.startsWith("http") ? (
-                    <video src={selectedDispute.buyerVideo} controls className="w-full rounded-xl bg-black max-h-60" />
-                  ) : (
-                    <p className="text-blue-400 font-bold">{selectedDispute.buyerVideo}</p>
-                  )}
+                  <video 
+                    src={selectedDispute.buyerVideo} 
+                    controls 
+                    playsInline
+                    className="w-full rounded-xl bg-black max-h-60 object-contain" 
+                  />
                 </div>
               )}
             </div>
 
+            {/* FORM NỘP ĐỐI CHẤT CHO NGƯỜI BÁN */}
             {(String(selectedDispute.sellerId) === String(uid) || isAdmin) && selectedDispute.status === "pending_seller" && (
               <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl space-y-3">
                 <p className="font-bold text-purple-300 text-xs">📤 Người Bán Nộp Đối Chất (Hạn chót: Trước thời gian sự kiện)</p>
@@ -240,14 +247,19 @@ export default function DisputeCenter() {
               </div>
             )}
 
+            {/* HIỂN THỊ ĐỐI CHẤT & VIDEO CỦA NGƯỜI BÁN */}
             {selectedDispute.sellerResponse && (
               <div className="p-4 bg-purple-500/10 rounded-xl text-xs space-y-2 border border-purple-500/20">
                 <p className="font-bold text-purple-300">Bằng chứng đối chất của Người bán:</p>
                 <p className="text-gray-200">{selectedDispute.sellerResponse}</p>
-                {selectedDispute.sellerVideo?.startsWith("http") ? (
-                  <video src={selectedDispute.sellerVideo} controls className="w-full rounded-xl bg-black max-h-60" />
-                ) : (
-                  <p className="text-blue-400 font-bold">🎥 {selectedDispute.sellerVideo}</p>
+                
+                {selectedDispute.sellerVideo && (
+                  <video 
+                    src={selectedDispute.sellerVideo} 
+                    controls 
+                    playsInline
+                    className="w-full rounded-xl bg-black max-h-60 object-contain mt-2" 
+                  />
                 )}
               </div>
             )}
@@ -258,6 +270,7 @@ export default function DisputeCenter() {
               </div>
             )}
 
+            {/* BẢNG ĐIỀU KHIỂN PHÁN QUYẾT ADMIN */}
             {isAdmin && selectedDispute.status !== "ruled_buyer_100" && selectedDispute.status !== "ruled_buyer_105" && selectedDispute.status !== "ruled_seller" && (
               <div className="pt-4 border-t border-white/10 space-y-4">
                 <p className="font-bold text-amber-400 text-xs">⚖️ Bảng Điều Khiển Phán Quyết (Admin):</p>

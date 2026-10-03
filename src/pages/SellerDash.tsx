@@ -5,7 +5,7 @@ import { supabase } from "../lib/supabaseClient";
 
 const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
-// BẢNG CẤU HÌNH TRẠNG THÁI CHUẨN
+// BẢNG CẤU HÌNH TRẠNG THÁI CHUẨN (ĐÃ BỔ SUNG REFUNDED)
 const STATUS_CFG = {
   pending_deposit: { label: "⏳ CHỜ ĐÓNG CỌC (25%)", color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
   available:       { label: "🟢 ĐANG MỞ BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
@@ -13,6 +13,7 @@ const STATUS_CFG = {
   locked:          { label: "🔒 ĐÃ BÁN (ĐÓNG BẰNG ESCROW)", color: "#FBBF24", bg: "rgba(251,191,36,0.15)" },
   completed:       { label: "✅ HOÀN THÀNH (ĐÃ GIẢI NGÂN)", color: "#34D399", bg: "rgba(52,211,153,0.15)" },
   disputed:        { label: "🚨 TRANH CHẤP (ĐÃ KHÓA TIỀN VÉ NÀY)", color: "#F87171", bg: "rgba(248,113,113,0.15)" },
+  refunded:        { label: "❌ ĐÃ HOÀN TIỀN (NGƯỜI MUA THẮNG)", color: "#9CA3AF", bg: "rgba(156,163,175,0.15)" },
 } as const;
 
 // POPUP YÊU CẦU RÚT TIỀN
@@ -180,8 +181,8 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const depositAmount = Math.round(listing.price * 0.25);
-  const cancellationFee = Math.round(depositAmount * 0.05); // Phí quản lý & hủy niêm yết 5%
-  const refundAmount = depositAmount - cancellationFee; // Hoàn 95% cọc
+  const cancellationFee = Math.round(depositAmount * 0.05);
+  const refundAmount = depositAmount - cancellationFee;
 
   const handleDeleteListing = async () => {
     if (listing.status === "locked" || listing.status === "disputed") {
@@ -203,7 +204,6 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
       const { error } = await supabase.from("tickets").delete().eq("id", listing.id);
       if (error) throw error;
 
-      // Cộng hoàn 95% cọc vào Số dư tài khoản người bán nếu vé đã đóng cọc
       if (isAvailable && refundAmount > 0 && currentProfile?.id) {
         const currentBal = Number((currentProfile as any).balance || 0);
         await supabase
@@ -224,7 +224,6 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
 
   const handlePayDepositNow = () => {
     onClose();
-    // Mở Modal VietQR để thanh toán đúng 25% cọc
     openCheckout({
       id: listing.id,
       eventId: 0,
@@ -243,7 +242,7 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
       sellerReviews: 0,
       verified: true,
       venue: "SafePass Escrow System",
-      isDeposit: true, // Kích hoạt luồng dành cho Người Bán Đóng Cọc
+      isDeposit: true,
     });
   };
 
@@ -282,7 +281,6 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
           </div>
         )}
 
-        {/* NÚT THANH TOÁN CỌC NẾU VÉ ĐANG CHỜ CỌC */}
         {listing.status === "pending_deposit" ? (
           <div className="space-y-2 pt-2 border-t border-white/10">
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
@@ -313,7 +311,7 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
           </button>
         ) : (
           <p className="text-xs text-center text-gray-400">
-            {listing.status === "locked" ? "Vé đang giao dịch, không thể hủy." : "Vé đã bán hoặc đang tranh chấp, không thể hủy."}
+            {listing.status === "locked" ? "Vé đang giao dịch, không thể hủy." : "Vé đã xử lý xong hoặc đang tranh chấp."}
           </p>
         )}
       </div>
@@ -321,7 +319,6 @@ function DetailModal({ listing, onClose, onDeleted }: { listing: MyListing; onCl
   );
 }
 
-// COMPONENT CHÍNH
 export default function SellerDash() {
   const { nav, kycStatus, currentProfile, currentUser, refreshProfile, t, openCheckout } = useApp();
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -329,7 +326,6 @@ export default function SellerDash() {
   const [sellerTickets, setSellerTickets] = useState<MyListing[]>([]);
   const [sellerDisputes, setSellerDisputes] = useState<any[]>([]);
 
-  // TÍCH HỢP ĐẦY ĐỦ THÔNG TIN LIÊN HỆ & NGÂN HÀNG
   const [phone, setPhone] = useState("");
   const [bankName, setBankName] = useState("Vietcombank");
   const [accountNumber, setAccountNumber] = useState("");
@@ -339,7 +335,6 @@ export default function SellerDash() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // ĐỒNG BỘ DỮ LIỆU TỪ PROFILE/AUTH
   useEffect(() => {
     if (currentProfile) {
       setPhone(currentProfile.phone || currentUser?.phone || "");
@@ -373,6 +368,8 @@ export default function SellerDash() {
               ? "disputed"
               : t.status === "completed"
               ? "completed"
+              : t.status === "refunded"
+              ? "refunded"
               : t.status === "sold" || t.status === "locked"
               ? "locked"
               : "available",
@@ -411,7 +408,6 @@ export default function SellerDash() {
     };
   }, [currentUser?.id, currentProfile?.id]);
 
-  // HÀM LƯU TÀI KHOẢN & SĐT (ĐỒNG BỘ PROFILES VÀ AUTH)
   const handleSaveBankInfo = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -425,21 +421,15 @@ export default function SellerDash() {
     try {
       const holderName = accountHolder.trim().toUpperCase() || (currentProfile?.full_name || "").toUpperCase();
 
-      // Lưu vào profiles table
       if (currentProfile?.id) {
-        const { error: profileErr } = await supabase.from("profiles").update({
+        await supabase.from("profiles").update({
           phone: phone.trim(),
           bank_name: bankName,
           bank_account: accountNumber.trim(),
           bank_holder: holderName,
         }).eq("id", currentProfile.id);
-
-        if (profileErr) {
-          console.warn("Lỗi lưu profiles:", profileErr.message);
-        }
       }
 
-      // Lưu dự phòng vào Auth metadata
       await supabase.auth.updateUser({
         data: {
           phone: phone.trim(),
@@ -483,24 +473,19 @@ export default function SellerDash() {
     );
   }
 
-  // THỐNG KÊ ESCROW CHUẨN XÁC:
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
-
-  // Vé ĐÃ CÓ NGƯỜI MUA nhưng KHÁCH CHƯA DÙNG (Đang đóng băng tiền Escrow chờ đi xem)
   const pendingSoldListings = allSellerListings.filter(l => l.status === "locked");
   const frozenEscrowBalance = pendingSoldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
 
-  // CHỈ VÉ ĐÃ HOÀN THÀNH (Khách đã vào cổng/dùng vé xong) MỚI ĐƯỢC GIẢI NGÂN VÀO SỐ DƯ RÚT TIỀN!
   const completedListings = allSellerListings.filter(l => l.status === "completed");
   const completedBalance = completedListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
 
-  // Số dư chính thức có thể rút về Ngân hàng
   const availableBalance = Number((currentProfile as any)?.balance || 0) + completedBalance;
 
   const STATS = [
     { label: "Tổng số vé niêm yết", value: String(allSellerListings.length), icon: "🎟️", color: "#8B5CF6" },
     { label: "Đang mở bán", value: String(activeCount), icon: "🟢", color: "#A3E635" },
-    { label: "Tiền đang đóng băng Escrow (Chờ đi xem)", value: fmt(frozenEscrowBalance), icon: "🔒", color: "#FBBF24" },
+    { label: "Tiền đang đóng băng Escrow", value: fmt(frozenEscrowBalance), icon: "🔒", color: "#FBBF24" },
     { label: "Số dư khả dụng để rút", value: fmt(availableBalance), icon: "💰", color: "#10B981" },
   ];
 
@@ -515,7 +500,6 @@ export default function SellerDash() {
         />
       )}
 
-      {/* CẢNH BÁO TRANH CHẤP */}
       {sellerDisputes.length > 0 && (
         <div className="mb-6 p-4 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -538,7 +522,6 @@ export default function SellerDash() {
         </div>
       )}
 
-      {/* HEADER BẢNG ĐIỀU KHIỂN */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-7">
         <div>
           <h1 className="font-display font-800 text-white text-2xl">{t.sellerDashTitle}</h1>
@@ -569,7 +552,6 @@ export default function SellerDash() {
         ))}
       </div>
 
-      {/* FORM THÔNG TIN LIÊN HỆ & NGÂN HÀNG (CÓ THÊM SĐT) */}
       <div className="sp-card p-6 mb-6">
         <div className="pb-4 border-b border-white/5 mb-4">
           <h2 className="font-display font-800 text-white text-base flex items-center gap-2">
