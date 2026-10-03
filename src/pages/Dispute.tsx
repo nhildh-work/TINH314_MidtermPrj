@@ -29,6 +29,7 @@ export default function Dispute() {
     try {
       setLoading(true);
 
+      // TỰ ĐỘNG TÌM SELLER_ID NẾU CHƯA CÓ TRONG TICKET OBJECT
       let targetSellerId = (disputeTicket as any).seller_id || (disputeTicket as any).sellerId;
       if (!targetSellerId && disputeTicket.id) {
         const { data: tk } = await supabase
@@ -39,21 +40,22 @@ export default function Dispute() {
         if (tk?.seller_id) targetSellerId = tk.seller_id;
       }
 
-      const fullReason = `[Sự cố]: ${reason} | [Chi tiết]: ${detail.trim() || "Không có"} | [TK Hoàn tiền]: Ngân hàng ${refundBankName.trim()} - STK: ${refundBankNum.trim()} - Chủ TK: ${refundBankHolder.trim().toUpperCase()}`;
-
-      // 1. Lưu hồ sơ khiếu nại lên Supabase
-      const { data: disputeData, error } = await supabase
+      // 1. Lưu hồ sơ khiếu nại lên Supabase (Gửi chuẩn các cột riêng)
+      const { error } = await supabase
         .from("disputes")
         .insert({
           ticket_id: disputeTicket.id,
           buyer_id: currentUser.id,
-          seller_id: targetSellerId,
-          reason: fullReason,
+          seller_id: targetSellerId || null,
+          reason: reason,
+          description: detail.trim() || reason,
           video_url: videoFile ? videoFile.name : null,
+          refund_bank_name: refundBankName.trim(),
+          refund_bank_account: refundBankNum.trim(),
+          refund_account_holder: refundBankHolder.trim().toUpperCase(),
           status: "pending_seller",
           created_at: new Date().toISOString(),
-        })
-        .select();
+        });
 
       if (error) throw error;
 

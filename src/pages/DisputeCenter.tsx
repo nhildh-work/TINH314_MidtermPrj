@@ -13,6 +13,9 @@ interface Dispute {
   buyerDetail: string;
   buyerVideo: string;
   createdAt: string;
+  refundBankName?: string;
+  refundBankAccount?: string;
+  refundAccountHolder?: string;
   sellerResponse?: string;
   sellerVideo?: string;
   ruling?: string;
@@ -21,7 +24,7 @@ interface Dispute {
 }
 
 export default function DisputeCenter() {
-  const { nav, role, currentUser } = useApp();
+  const { nav, role, currentUser, currentProfile } = useApp();
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [selectedDispute, setSelectedDispute] = useState<Dispute | null>(null);
   const [sellerText, setSellerText] = useState("");
@@ -29,28 +32,22 @@ export default function DisputeCenter() {
 
   const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
   const isSeller = role === "seller";
-
-  const { currentProfile } = useApp();
   const uid = currentUser?.id || currentProfile?.id;
 
   const fetchDisputes = async () => {
-    const { data } = await supabase
-      .from("disputes")
-      .select("*, tickets(*)")
-      .order("created_at", { ascending: false });
+    if (!uid) return;
 
-    if (data) {
-      const filteredData = data.filter((d: any) => {
-        if (isAdmin) return true; // Admin thấy toàn bộ
-        if (isSeller) {
-          // Người bán thấy tranh chấp liên quan tới các vé của họ
-          return String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid);
-        }
-        // Người mua thấy các khiếu nại do chính họ báo cáo
-        return String(d.buyer_id) === String(uid);
-      });
+    let query = supabase.from("disputes").select("*, tickets(*)");
 
-      const mapped: Dispute[] = filteredData.map((d: any) => ({
+    // NẾU KHÔNG PHẢI ADMIN: Chỉ lấy đơn tranh chấp có buyer_id hoặc seller_id khớp với user đang đăng nhập
+    if (!isAdmin) {
+      query = query.or(`buyer_id.eq.${uid},seller_id.eq.${uid}`);
+    }
+
+    const { data, error } = await query.order("created_at", { ascending: false });
+
+    if (!error && data) {
+      const mapped: Dispute[] = data.map((d: any) => ({
         id: String(d.id),
         ticketId: d.ticket_id,
         eventTitle: d.tickets?.event_name || "Vé Concert",
@@ -58,9 +55,12 @@ export default function DisputeCenter() {
         amount: Number(d.tickets?.price || 0),
         status: d.status,
         buyerReason: d.reason,
-        buyerDetail: d.description || d.buyer_detail || d.reason,
+        buyerDetail: d.description || d.reason,
         buyerVideo: d.video_url,
         createdAt: d.created_at,
+        refundBankName: d.refund_bank_name,
+        refundBankAccount: d.refund_bank_account,
+        refundAccountHolder: d.refund_account_holder,
         sellerResponse: d.seller_response,
         sellerVideo: d.seller_video,
         ruling: d.ruling,
@@ -84,7 +84,7 @@ export default function DisputeCenter() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [uid]);
 
   // HÀM ADMIN RA PHÁN QUYẾT TỰ ĐỘNG CĂN CỨ THEO THỜI GIAN
   const handleAdminRuling = async (winner: "buyer" | "seller") => {
@@ -99,11 +99,9 @@ export default function DisputeCenter() {
 
     if (winner === "buyer") {
       if (diffHours >= 2) {
-        // Trên 2 tiếng trước giờ diễn: Hoàn 100% tiền vé
         rulingMessage = `PHÁN QUYẾT ADMIN: Người Mua thắng án (Khiếu nại trước giờ G > 2 tiếng). Hoàn trả 100% tiền vé (${selectedDispute.amount.toLocaleString()} VND) cho Người Mua. Giải ngân lại cọc cho Người Bán.`;
         finalStatus = "ruled_buyer_100";
       } else {
-        // Dưới 2 tiếng / Sát giờ diễn / Tại cổng: Hoàn 105% (5% phạt cấn trừ cọc người bán)
         const bonusAmount = selectedDispute.amount * 1.05;
         rulingMessage = `PHÁN QUYẾT ADMIN: Người Mua thắng án (Khiếu nại khẩn cấp sát giờ diễn < 2 tiếng). Bồi thường 105% giá vé (${bonusAmount.toLocaleString()} VND - Phạt 5% cấn trừ trực tiếp tiền cọc Người Bán).`;
         finalStatus = "ruled_buyer_105";
@@ -111,7 +109,6 @@ export default function DisputeCenter() {
 
       await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
     } else {
-      // Người Bán Thắng
       rulingMessage = `PHÁN QUYẾT ADMIN: Người Bán thắng án (Bằng chứng vé gốc hợp lệ). Giải ngân 100% tiền bán vé + 25% tiền cọc cho Người Bán.`;
       finalStatus = "ruled_seller";
 
@@ -135,7 +132,7 @@ export default function DisputeCenter() {
     const now = new Date().getTime();
     const eventTime = new Date(selectedDispute.eventStartTime).getTime();
 
-    // QUÁ GIỜ BẮT ĐẦU SỰ KIỆN: TỰ ĐỘNG XỬ THUẢ VÀ TƯỚC QUYỀN KHÁNG CÁO
+    // QUÁ GIỜ BẮT ĐẦU SỰ KIỆN: TỰ ĐỘNG XỬ THUA
     if (now >= eventTime) {
       alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
 
@@ -198,12 +195,17 @@ export default function DisputeCenter() {
           <div className="sp-card p-6 space-y-5">
             <h2 className="font-display font-800 text-white text-lg">Chi Tiết Tranh Chấp #{selectedDispute.id}</h2>
             
-            <div className="p-3.5 bg-black/40 rounded-xl text-xs space-y-1 border border-white/5">
+            <div className="p-3.5 bg-black/40 rounded-xl text-xs space-y-1.5 border border-white/5">
               <p className="text-gray-300">Sự kiện: <strong>{selectedDispute.eventTitle}</strong></p>
               <p className="text-gray-300">Giá trị vé: <strong className="text-emerald-400">{selectedDispute.amount.toLocaleString()} VND</strong></p>
               <p className="text-gray-300">Lý do Người Mua: <strong className="text-red-400">{selectedDispute.buyerReason}</strong></p>
               <p className="text-gray-300">Mô tả: {selectedDispute.buyerDetail}</p>
               <p className="text-gray-300">Video bằng chứng: <span className="text-blue-400 font-bold">{selectedDispute.buyerVideo}</span></p>
+              {selectedDispute.refundBankAccount && (
+                <p className="text-purple-300 pt-1 border-t border-white/5 font-mono">
+                  🏦 TK Nhận Hoàn Tiền: {selectedDispute.refundBankName} - {selectedDispute.refundBankAccount} ({selectedDispute.refundAccountHolder})
+                </p>
+              )}
             </div>
 
             {/* FORM NGƯỜI BÁN NỘP ĐỐI CHẤT */}
