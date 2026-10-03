@@ -29,13 +29,16 @@ export default function Dispute() {
     try {
       setLoading(true);
 
-      // 1. Upload video lên Supabase Storage 'dispute-videos'
+      // 1. TẢI VIDEO LÊN KÈM ĐỊNH DẠNG (contentType)
       const fileExt = videoFile.name.split('.').pop();
       const fileName = `${disputeTicket.id}_${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from('dispute-videos')
-        .upload(fileName, videoFile, { upsert: true });
+        .upload(fileName, videoFile, { 
+          upsert: true,
+          contentType: videoFile.type // Bắt buộc có dòng này để video play được
+        });
 
       if (uploadError) throw uploadError;
 
@@ -45,24 +48,12 @@ export default function Dispute() {
 
       const actualVideoUrl = publicUrlData.publicUrl;
 
-      // 2. Tìm seller_id của vé để phòng trường hợp bị missing
-      let targetSellerId = (disputeTicket as any).seller_id || (disputeTicket as any).sellerId;
-      if (!targetSellerId && disputeTicket.id) {
-        const { data: tk } = await supabase
-          .from("tickets")
-          .select("seller_id")
-          .eq("id", disputeTicket.id)
-          .maybeSingle();
-        if (tk?.seller_id) targetSellerId = tk.seller_id;
-      }
-
-      // 3. Insert thông tin tranh chấp lên Supabase
+      // 2. LƯU BẢN GHI (seller_id có thể để trống vì Trigger SQL đã tự động điền)
       const { error } = await supabase
         .from("disputes")
         .insert({
           ticket_id: disputeTicket.id,
           buyer_id: currentUser.id,
-          seller_id: targetSellerId || null,
           reason: reason,
           description: detail.trim() || reason,
           video_url: actualVideoUrl,
@@ -75,13 +66,12 @@ export default function Dispute() {
 
       if (error) throw error;
 
-      // 4. Khóa khoản thanh toán (Đổi trạng thái vé sang disputed)
+      // 3. ĐÓNG BĂNG VÉ
       await supabase
         .from("tickets")
         .update({ status: "disputed" })
         .eq("id", disputeTicket.id);
 
-      // 5. Bắn Gmail thông báo
       if (currentUser.email) {
         sendGmailNotification(
           currentUser.email,

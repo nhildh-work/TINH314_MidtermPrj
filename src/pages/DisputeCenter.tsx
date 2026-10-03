@@ -37,7 +37,6 @@ export default function DisputeCenter() {
   const fetchDisputes = async () => {
     if (!uid) return;
 
-    // KÉO TOÀN BỘ TABLE BẰNG QUERY CHUẨN KHÔNG CẦN .OR() ĐỂ TRÁNH LỖI SYNTAX SUPABASE
     const { data, error } = await supabase
       .from("disputes")
       .select("*, tickets(*)")
@@ -49,7 +48,6 @@ export default function DisputeCenter() {
     }
 
     if (data) {
-      // BẮT CHUẨN: Hễ uid hiện tại trùng với buyer_id HOẶC seller_id HOẶC seller_id trong tickets thì CHO HIỆN
       const myDisputes = isAdmin
         ? data
         : data.filter((d: any) => {
@@ -85,12 +83,9 @@ export default function DisputeCenter() {
 
   useEffect(() => {
     fetchDisputes();
-
     const channel = supabase
       .channel("dispute_center_realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "disputes" }, () => {
-        fetchDisputes();
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "disputes" }, () => fetchDisputes())
       .subscribe();
 
     return () => {
@@ -98,7 +93,6 @@ export default function DisputeCenter() {
     };
   }, [uid]);
 
-  // PHÁN QUYẾT ADMIN
   const handleAdminRuling = async (winner: "buyer" | "seller") => {
     if (!selectedDispute) return;
 
@@ -118,26 +112,19 @@ export default function DisputeCenter() {
         rulingMessage = `PHÁN QUYẾT ADMIN: Người Mua thắng án (Khiếu nại khẩn cấp sát giờ diễn < 2 tiếng). Bồi thường 105% giá vé (${bonusAmount.toLocaleString()} VND - Phạt 5% cấn trừ trực tiếp tiền cọc Người Bán).`;
         finalStatus = "ruled_buyer_105";
       }
-
       await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
     } else {
       rulingMessage = `PHÁN QUYẾT ADMIN: Người Bán thắng án (Bằng chứng vé gốc hợp lệ). Giải ngân 100% tiền bán vé + 25% tiền cọc cho Người Bán.`;
       finalStatus = "ruled_seller";
-
       await supabase.from("tickets").update({ status: "completed" }).eq("id", selectedDispute.ticketId);
     }
 
-    await supabase.from("disputes").update({
-      ruling: rulingMessage,
-      status: finalStatus,
-    }).eq("id", selectedDispute.id);
-
+    await supabase.from("disputes").update({ ruling: rulingMessage, status: finalStatus }).eq("id", selectedDispute.id);
     alert("Đã ban hành phán quyết thành công!");
     fetchDisputes();
     setSelectedDispute(null);
   };
 
-  // NGƯỜI BÁN NỘP BẰNG CHỨNG ĐỐI CHẤT
   const handleSellerRespond = async () => {
     if (!selectedDispute || !sellerText || !sellerVideoFile) return;
 
@@ -146,12 +133,10 @@ export default function DisputeCenter() {
 
     if (now >= eventTime) {
       alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
-
       await supabase.from("disputes").update({
         status: "final_buyer_autoloss",
         ruling: "TỰ ĐỘNG XỬ THUA: Người Bán không nộp đối chất trước thời gian sự kiện bắt đầu. Người Mua thắng 100% & Người Bán không được quyền kháng cáo.",
       }).eq("id", selectedDispute.id);
-
       await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
       fetchDisputes();
       return;
@@ -165,7 +150,10 @@ export default function DisputeCenter() {
 
       const { error: upErr } = await supabase.storage
         .from('dispute-videos')
-        .upload(fileName, sellerVideoFile, { upsert: true });
+        .upload(fileName, sellerVideoFile, { 
+          upsert: true,
+          contentType: sellerVideoFile.type // Ép chuẩn định dạng video
+        });
 
       if (upErr) throw upErr;
 
@@ -196,7 +184,6 @@ export default function DisputeCenter() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Danh sách bên trái */}
         <div className="space-y-3">
           {disputes.length === 0 ? (
             <div className="sp-card p-12 text-center text-gray-500 text-xs">Chưa có tranh chấp nào.</div>
@@ -219,7 +206,6 @@ export default function DisputeCenter() {
           )}
         </div>
 
-        {/* Chi tiết bên phải */}
         {selectedDispute ? (
           <div className="sp-card p-6 space-y-5">
             <h2 className="font-display font-800 text-white text-lg">Chi Tiết Tranh Chấp #{selectedDispute.id}</h2>
@@ -230,7 +216,6 @@ export default function DisputeCenter() {
               <p className="text-gray-300">Lý do Người Mua: <strong className="text-red-400">{selectedDispute.buyerReason}</strong></p>
               <p className="text-gray-300">Mô tả chi tiết: {selectedDispute.buyerDetail}</p>
               
-              {/* VIDEO BẰNG CHỨNG NGƯỜI MUA */}
               {selectedDispute.buyerVideo && (
                 <div className="pt-2">
                   <p className="text-gray-400 mb-1 font-bold">🎥 Video bằng chứng của Người Mua:</p>
@@ -249,7 +234,6 @@ export default function DisputeCenter() {
               )}
             </div>
 
-            {/* FORM NGƯỜI BÁN NỘP ĐỐI CHẤT */}
             {(String(selectedDispute.sellerId) === String(uid) || isAdmin) && selectedDispute.status === "pending_seller" && (
               <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl space-y-3">
                 <p className="font-bold text-purple-300 text-xs">📤 Người Bán Nộp Đối Chất (Hạn chót: Trước thời gian sự kiện)</p>
@@ -261,7 +245,6 @@ export default function DisputeCenter() {
               </div>
             )}
 
-            {/* BẰNG CHỨNG NGƯỜI BÁN ĐÃ NỘP */}
             {selectedDispute.sellerResponse && (
               <div className="p-4 bg-purple-500/10 rounded-xl text-xs space-y-2 border border-purple-500/20">
                 <p className="font-bold text-purple-300">Bằng chứng đối chất của Người bán:</p>
@@ -274,14 +257,12 @@ export default function DisputeCenter() {
               </div>
             )}
 
-            {/* PHÁN QUYẾT ADMIN */}
             {selectedDispute.ruling && (
               <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 leading-relaxed font-bold">
-                ⚖️️ {selectedDispute.ruling}
+                ⚖️ {selectedDispute.ruling}
               </div>
             )}
 
-            {/* BẢNG ĐIỀU KHIỂN ADMIN */}
             {isAdmin && (
               <div className="pt-4 border-t border-white/10 space-y-3">
                 <p className="font-bold text-amber-400 text-xs">⚖️ Bảng Điều Khiển Phán Quyết Admin:</p>
@@ -290,13 +271,13 @@ export default function DisputeCenter() {
                     onClick={() => handleAdminRuling("buyer")}
                     className="py-3 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl cursor-pointer"
                   >
-                    ✅ Xử NGƯỜI MUA Thắng (Hoàn 100% hoặc 105%)
+                    ✅ Xử NGƯỜI MUA Thắng
                   </button>
                   <button
                     onClick={() => handleAdminRuling("seller")}
                     className="py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer"
                   >
-                    ✅ Xử NGƯỜI BÁN Thắng (Giải ngân 100% + Cọc)
+                    ✅ Xử NGƯỜI BÁN Thắng
                   </button>
                 </div>
               </div>
