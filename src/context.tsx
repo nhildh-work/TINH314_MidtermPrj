@@ -133,34 +133,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [showUsersModal, setShowUsersModal] = useState(false);
 
-  const [purchasedTickets, setPurchasedTickets] = useState<MyTicket[]>(() => {
-    try {
-      const stored = localStorage.getItem("safepass_purchased_tickets");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          // Lọc bỏ các vé cọc hoặc vé mẫu không hợp lệ
-          const cleaned = parsed.filter((t: any) => !t.isDeposit && !t.tier?.includes("Cọc") && t.id !== 12);
-          localStorage.setItem("safepass_purchased_tickets", JSON.stringify(cleaned));
-          return cleaned;
-        }
-      }
-    } catch (e) {
-      console.warn("Error reading purchased tickets:", e);
-    }
-    return [];
-  });
+  const [purchasedTickets, setPurchasedTickets] = useState<MyTicket[]>([]);
 
-  const addPurchasedTicket = (ticket: MyTicket) => {
+  // Tự động nạp danh sách vé đã mua cách ly theo UID của người dùng đang đăng nhập
+  useEffect(() => {
+    try {
+      localStorage.removeItem("safepass_purchased_tickets");
+    } catch (e) {}
+
+    const uid = currentUser?.id || currentProfile?.id;
+    if (uid) {
+      try {
+        const stored = localStorage.getItem(`safepass_purchased_tickets_${uid}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            setPurchasedTickets(parsed);
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+    setPurchasedTickets([]);
+  }, [currentUser?.id, currentProfile?.id]);
+
+  const addPurchasedTicket = (ticket: MyTicket & { buyerId?: string }) => {
     // Tuyệt đối không thêm vé cọc ký quỹ vào danh sách vé đã mua
     if ((ticket as any).isDeposit || ticket.tier?.includes("Cọc")) return;
 
+    const uid = currentUser?.id || currentProfile?.id || (ticket as any).buyerId;
+
     setPurchasedTickets(prev => {
-      const updated = [ticket, ...prev.filter(t => t.id !== ticket.id)];
-      try {
-        localStorage.setItem("safepass_purchased_tickets", JSON.stringify(updated));
-      } catch (e) {
-        console.warn("Error saving purchased tickets:", e);
+      const updated = [{ ...ticket, buyerId: uid }, ...prev.filter(t => t.id !== ticket.id)];
+      if (uid) {
+        try {
+          localStorage.setItem(`safepass_purchased_tickets_${uid}`, JSON.stringify(updated));
+        } catch (e) {
+          console.warn("Error saving user purchased tickets:", e);
+        }
       }
       return updated;
     });

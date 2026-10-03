@@ -52,18 +52,11 @@ export default function MyTickets() {
     const uid = currentUser?.id || currentProfile?.id;
     if (!uid) return;
 
-    // Tự động dọn sạch các vé cọc người bán lưu sót lại trong localStorage cũ
+    // Dọn dẹp triệt để localStorage dùng chung cũ để tránh vé mẫu bị tràn sang tài khoản khác
     try {
-      const stored = localStorage.getItem("safepass_purchased_tickets");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          const cleaned = parsed.filter((t: any) => !t.isDeposit && !t.tier?.includes("Cọc") && t.id !== 12);
-          localStorage.setItem("safepass_purchased_tickets", JSON.stringify(cleaned));
-        }
-      }
+      localStorage.removeItem("safepass_purchased_tickets");
     } catch (e) {
-      console.warn("Lỗi kiểm tra vé lưu cục bộ:", e);
+      console.warn("Lỗi dọn dẹp vé dùng chung cũ:", e);
     }
 
     async function loadMyTransactions() {
@@ -124,10 +117,18 @@ export default function MyTickets() {
     loadMyTransactions();
   }, [currentUser?.id, currentProfile?.id]);
 
-  // Kết hợp vé từ Supabase và vé từ Local Context an toàn không mất vé
-  const combinedTickets = [...purchasedTickets, ...(contextPurchasedTickets || [])];
-  const seenIds = new Set<number>();
   const uid = currentUser?.id || currentProfile?.id;
+
+  // Lọc contextPurchasedTickets chỉ lấy vé mua thực sự thuộc về user_id này
+  const validContextTickets = (contextPurchasedTickets || []).filter((t: any) => {
+    if (t.buyerId && String(t.buyerId) !== String(uid)) return false;
+    if (t.buyer_id && String(t.buyer_id) !== String(uid)) return false;
+    return true;
+  });
+
+  // Kết hợp vé từ Supabase và vé từ Local Context chuẩn xác
+  const combinedTickets = [...purchasedTickets, ...validContextTickets];
+  const seenIds = new Set<number>();
 
   const allTickets = combinedTickets.filter(t => {
     if (seenIds.has(t.id)) return false;

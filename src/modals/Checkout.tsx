@@ -220,8 +220,9 @@ export default function CheckoutModal() {
             date: checkoutTicket.eventDate || "Sắp diễn ra",
             venue: checkoutTicket.venue || checkoutTicket.city || "TP.HCM",
             price: total,
-            status: "paid", 
-          });
+            status: "paid",
+            buyerId: activeUserId,
+          } as any);
         }
       }
     } catch (e) {
