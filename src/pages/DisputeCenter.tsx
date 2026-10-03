@@ -37,7 +37,6 @@ export default function DisputeCenter() {
   const fetchDisputes = async () => {
     if (!uid) return;
 
-    // Lấy tất cả disputes mà RLS cho phép tài khoản này nhìn thấy
     const { data, error } = await supabase
       .from("disputes")
       .select("*, tickets(*)")
@@ -49,7 +48,6 @@ export default function DisputeCenter() {
     }
 
     if (data) {
-      // Vì đã có RLS lo việc chặn, ta chỉ cần map lại data cho đẹp
       const mapped: Dispute[] = data.map((d: any) => ({
         id: String(d.id),
         ticketId: d.ticket_id,
@@ -59,16 +57,16 @@ export default function DisputeCenter() {
         status: d.status,
         buyerReason: d.reason,
         buyerDetail: d.description || d.reason,
-        buyerVideo: d.video_url,
+        buyerVideo: d.evidence_url, // FIX: video_url -> evidence_url
         createdAt: d.created_at,
         refundBankName: d.refund_bank_name,
         refundBankAccount: d.refund_bank_account,
         refundAccountHolder: d.refund_account_holder,
-        sellerResponse: d.seller_response,
-        sellerVideo: d.seller_video,
-        ruling: d.ruling,
+        sellerResponse: d.seller_response, // LƯU Ý BÊN DƯỚI
+        sellerVideo: d.seller_evidence_url, // FIX: seller_video -> seller_evidence_url
+        ruling: d.resolution_notes, // FIX: ruling -> resolution_notes
         buyerId: String(d.buyer_id),
-        sellerId: String(d.seller_id), // Lấy thẳng từ bảng dispute, không móc từ tickets nữa
+        sellerId: String(d.seller_id), 
       }));
 
       setDisputes(mapped);
@@ -113,7 +111,13 @@ export default function DisputeCenter() {
       await supabase.from("tickets").update({ status: "completed" }).eq("id", selectedDispute.ticketId);
     }
 
-    await supabase.from("disputes").update({ ruling: rulingMessage, status: finalStatus }).eq("id", selectedDispute.id);
+    // FIX: Sử dụng đúng cột resolution_notes và resolved_at
+    await supabase.from("disputes").update({ 
+      resolution_notes: rulingMessage, 
+      status: finalStatus,
+      resolved_at: new Date().toISOString()
+    }).eq("id", selectedDispute.id);
+    
     alert("Đã ban hành phán quyết thành công!");
     fetchDisputes();
     setSelectedDispute(null);
@@ -129,7 +133,8 @@ export default function DisputeCenter() {
       alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
       await supabase.from("disputes").update({
         status: "final_buyer_autoloss",
-        ruling: "TỰ ĐỘNG XỬ THUA: Người Bán không nộp đối chất trước thời gian sự kiện bắt đầu. Người Mua thắng 100% & Người Bán không được quyền kháng cáo.",
+        resolution_notes: "TỰ ĐỘNG XỬ THUA: Người Bán không nộp đối chất trước thời gian sự kiện bắt đầu. Người Mua thắng 100% & Người Bán không được quyền kháng cáo.",
+        resolved_at: new Date().toISOString()
       }).eq("id", selectedDispute.id);
       await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
       fetchDisputes();
@@ -146,16 +151,17 @@ export default function DisputeCenter() {
         .from('dispute-videos')
         .upload(fileName, sellerVideoFile, { 
           upsert: true,
-          contentType: sellerVideoFile.type // Ép chuẩn định dạng video
+          contentType: sellerVideoFile.type 
         });
 
       if (upErr) throw upErr;
 
       const { data: pubUrl } = supabase.storage.from('dispute-videos').getPublicUrl(fileName);
 
+      // FIX: Cập nhật đúng cột DB seller_evidence_url
       await supabase.from("disputes").update({
-        seller_response: sellerText,
-        seller_video: pubUrl.publicUrl,
+        seller_response: sellerText, // Xem ghi chú bên dưới
+        seller_evidence_url: pubUrl.publicUrl, 
         status: "under_review",
       }).eq("id", selectedDispute.id);
 
@@ -168,6 +174,7 @@ export default function DisputeCenter() {
     }
   };
 
+  // Phía dưới giao diện UI được giữ nguyên...
   return (
     <div className="max-w-[1680px] mx-auto px-5 py-8 space-y-6">
       <div className="flex items-center gap-3">

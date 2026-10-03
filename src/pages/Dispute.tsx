@@ -29,7 +29,28 @@ export default function Dispute() {
     try {
       setLoading(true);
 
-      // 1. TẢI VIDEO LÊN KÈM ĐỊNH DẠNG (contentType)
+      // 1. LẤY TRANSACTION_ID VÀ SELLER_ID ĐỂ MAP VÀO BẢNG DISPUTES
+      const { data: ticketData, error: ticketErr } = await supabase
+        .from("tickets")
+        .select("seller_id")
+        .eq("id", disputeTicket.id)
+        .single();
+        
+      const { data: txData, error: txErr } = await supabase
+        .from("transactions")
+        .select("id")
+        .eq("ticket_id", disputeTicket.id)
+        .eq("buyer_id", currentUser.id)
+        .eq("status", "paid")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (ticketErr || txErr || !txData) {
+        throw new Error("Không tìm thấy dữ liệu giao dịch hợp lệ. Vui lòng thử lại.");
+      }
+
+      // 2. TẢI VIDEO LÊN
       const fileExt = videoFile.name.split('.').pop();
       const fileName = `${disputeTicket.id}_${Date.now()}.${fileExt}`;
 
@@ -37,7 +58,7 @@ export default function Dispute() {
         .from('dispute-videos')
         .upload(fileName, videoFile, { 
           upsert: true,
-          contentType: videoFile.type // Bắt buộc có dòng này để video play được
+          contentType: videoFile.type 
         });
 
       if (uploadError) throw uploadError;
@@ -48,15 +69,17 @@ export default function Dispute() {
 
       const actualVideoUrl = publicUrlData.publicUrl;
 
-      // 2. LƯU BẢN GHI (seller_id có thể để trống vì Trigger SQL đã tự động điền)
+      // 3. LƯU BẢN GHI (Sử dụng đúng tên cột DB: evidence_url)
       const { error } = await supabase
         .from("disputes")
         .insert({
           ticket_id: disputeTicket.id,
+          transaction_id: txData.id,
           buyer_id: currentUser.id,
+          seller_id: ticketData.seller_id,
           reason: reason,
           description: detail.trim() || reason,
-          video_url: actualVideoUrl,
+          evidence_url: actualVideoUrl, // FIX: Đã đổi từ video_url thành evidence_url
           refund_bank_name: refundBankName.trim(),
           refund_bank_account: refundBankNum.trim(),
           refund_account_holder: refundBankHolder.trim().toUpperCase(),
@@ -66,11 +89,16 @@ export default function Dispute() {
 
       if (error) throw error;
 
-      // 3. ĐÓNG BĂNG VÉ
+      // 4. ĐÓNG BĂNG VÉ & GIAO DỊCH
       await supabase
         .from("tickets")
         .update({ status: "disputed" })
         .eq("id", disputeTicket.id);
+
+      await supabase
+        .from("transactions")
+        .update({ status: "disputed" })
+        .eq("id", txData.id);
 
       if (currentUser.email) {
         sendGmailNotification(
@@ -103,6 +131,7 @@ export default function Dispute() {
     );
   }
 
+  // Phía dưới UI giữ nguyên...
   return (
     <div className="max-w-3xl mx-auto px-5 py-8 space-y-6">
       <div className="flex items-center gap-3">
