@@ -45,7 +45,7 @@ export default function DisputeCenter() {
         amount: Number(d.tickets?.price || 0),
         status: d.status,
         buyerReason: d.reason,
-        buyerDetail: d.description,
+        buyerDetail: d.description || d.buyer_detail || d.reason,
         buyerVideo: d.video_url,
         createdAt: d.created_at,
         sellerResponse: d.seller_response,
@@ -122,7 +122,7 @@ export default function DisputeCenter() {
     const now = new Date().getTime();
     const eventTime = new Date(selectedDispute.eventStartTime).getTime();
 
-    // QUÁ GIỜ BẮT ĐẦU SỰ KIỆN: TỰ ĐỘNG XỬ THUẢ VÀ TƯỚC QUYỀN KHÁNG CÁO
+    // QUÁ GIỜ BẮT ĐẦU SỰ KIỆN: TỰ ĐỘNG XỬ THUA VÀ TƯỚC QUYỀN KHÁNG CÁO
     if (now >= eventTime) {
       alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
 

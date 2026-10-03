@@ -29,24 +29,25 @@ export default function Dispute() {
     try {
       setLoading(true);
 
+      // Gộp mô tả chi tiết vào lý do để không bị lỗi thiếu cột description trên Supabase
+      const fullReason = detail.trim() ? `${reason} — Chi tiết: ${detail.trim()}` : reason;
+
       // 1. Lưu hồ sơ khiếu nại lên Supabase
       const { data: disputeData, error } = await supabase
         .from("disputes")
         .insert({
           ticket_id: disputeTicket.id,
           buyer_id: currentUser.id,
-          seller_id: (disputeTicket as any).sellerId || null,
-          reason: reason,
-          description: detail,
-          video_url: videoFile.name,
+          seller_id: (disputeTicket as any).seller_id || (disputeTicket as any).sellerId || null,
+          reason: fullReason,
+          video_url: videoFile ? videoFile.name : null,
           refund_bank_account: refundBankNum.trim(),
           refund_bank_name: refundBankName.trim(),
           refund_account_holder: refundBankHolder.trim().toUpperCase(),
           status: "pending_seller",
           created_at: new Date().toISOString(),
         })
-        .select()
-        .single();
+        .select();
 
       if (error) throw error;
 
