@@ -34,7 +34,7 @@ export default function DisputeCenter() {
   const [adminPenalty, setAdminPenalty] = useState("buyer_win_no_penalty");
 
   const uid = currentUser?.id || currentProfile?.id;
-  const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
+  const isAdmin = role === "admin" || currentUser?.email === "safepass.vn@gmail.com";
 
   const fetchDisputes = async () => {
     if (!uid) return;
