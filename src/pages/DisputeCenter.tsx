@@ -37,6 +37,7 @@ export default function DisputeCenter() {
   const fetchDisputes = async () => {
     if (!uid) return;
 
+    // Lấy tất cả disputes mà RLS cho phép tài khoản này nhìn thấy
     const { data, error } = await supabase
       .from("disputes")
       .select("*, tickets(*)")
@@ -48,15 +49,8 @@ export default function DisputeCenter() {
     }
 
     if (data) {
-      const myDisputes = isAdmin
-        ? data
-        : data.filter((d: any) => {
-            const isMyBuyer = String(d.buyer_id) === String(uid);
-            const isMySeller = String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid);
-            return isMyBuyer || isMySeller;
-          });
-
-      const mapped: Dispute[] = myDisputes.map((d: any) => ({
+      // Vì đã có RLS lo việc chặn, ta chỉ cần map lại data cho đẹp
+      const mapped: Dispute[] = data.map((d: any) => ({
         id: String(d.id),
         ticketId: d.ticket_id,
         eventTitle: d.tickets?.event_name || "Vé Concert",
@@ -74,7 +68,7 @@ export default function DisputeCenter() {
         sellerVideo: d.seller_video,
         ruling: d.ruling,
         buyerId: String(d.buyer_id),
-        sellerId: String(d.seller_id || d.tickets?.seller_id || ""),
+        sellerId: String(d.seller_id), // Lấy thẳng từ bảng dispute, không móc từ tickets nữa
       }));
 
       setDisputes(mapped);
