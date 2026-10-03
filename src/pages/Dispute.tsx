@@ -29,7 +29,7 @@ export default function Dispute() {
     try {
       setLoading(true);
 
-      // 1. UPLOAD VIDEO LÊN SUPABASE STORAGE BUCKET 'dispute-videos'
+      // 1. Upload video lên Supabase Storage 'dispute-videos'
       const fileExt = videoFile.name.split('.').pop();
       const fileName = `${disputeTicket.id}_${Date.now()}.${fileExt}`;
 
@@ -39,14 +39,13 @@ export default function Dispute() {
 
       if (uploadError) throw uploadError;
 
-      // Lấy đường dẫn Public URL của video
       const { data: publicUrlData } = supabase.storage
         .from('dispute-videos')
         .getPublicUrl(fileName);
 
       const actualVideoUrl = publicUrlData.publicUrl;
 
-      // 2. TÌM SELLER_ID CỦA VÉ NẾU CHƯA CÓ TRONG DỮ LIỆU
+      // 2. Tìm seller_id của vé để phòng trường hợp bị missing
       let targetSellerId = (disputeTicket as any).seller_id || (disputeTicket as any).sellerId;
       if (!targetSellerId && disputeTicket.id) {
         const { data: tk } = await supabase
@@ -57,7 +56,7 @@ export default function Dispute() {
         if (tk?.seller_id) targetSellerId = tk.seller_id;
       }
 
-      // 3. LƯU HỒ SƠ KHAN CAP LÊN TABLE 'disputes' WITH PUBLIC URL
+      // 3. Insert thông tin tranh chấp lên Supabase
       const { error } = await supabase
         .from("disputes")
         .insert({
@@ -66,7 +65,7 @@ export default function Dispute() {
           seller_id: targetSellerId || null,
           reason: reason,
           description: detail.trim() || reason,
-          video_url: actualVideoUrl, // Lưu link URL công khai dạng https://...
+          video_url: actualVideoUrl,
           refund_bank_name: refundBankName.trim(),
           refund_bank_account: refundBankNum.trim(),
           refund_account_holder: refundBankHolder.trim().toUpperCase(),
@@ -76,13 +75,13 @@ export default function Dispute() {
 
       if (error) throw error;
 
-      // 4. KHÓA TỰ ĐỘNG TIỀN VÉ NÀY (ĐỔI TRẠNG THÁI VÉ SANG 'disputed')
+      // 4. Khóa khoản thanh toán (Đổi trạng thái vé sang disputed)
       await supabase
         .from("tickets")
         .update({ status: "disputed" })
         .eq("id", disputeTicket.id);
 
-      // 5. GỬI EMAIL THÔNG BÁO CHO BÊN MUA
+      // 5. Bắn Gmail thông báo
       if (currentUser.email) {
         sendGmailNotification(
           currentUser.email,

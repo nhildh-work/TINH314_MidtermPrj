@@ -19,6 +19,8 @@ interface Dispute {
   sellerResponse?: string;
   sellerVideo?: string;
   ruling?: string;
+  buyerId: string;
+  sellerId: string;
 }
 
 export default function DisputeCenter() {
@@ -29,24 +31,34 @@ export default function DisputeCenter() {
   const [sellerVideoFile, setSellerVideoFile] = useState<File | null>(null);
   const [uploadingSeller, setUploadingSeller] = useState(false);
 
-  const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
-  const isSeller = role === "seller";
   const uid = currentUser?.id || currentProfile?.id;
+  const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
 
   const fetchDisputes = async () => {
     if (!uid) return;
 
-    let query = supabase.from("disputes").select("*, tickets(*)");
+    // KÉO TOÀN BỘ TABLE BẰNG QUERY CHUẨN KHÔNG CẦN .OR() ĐỂ TRÁNH LỖI SYNTAX SUPABASE
+    const { data, error } = await supabase
+      .from("disputes")
+      .select("*, tickets(*)")
+      .order("created_at", { ascending: false });
 
-    // Lọc đúng dữ liệu của User đang đăng nhập
-    if (!isAdmin) {
-      query = query.or(`buyer_id.eq.${uid},seller_id.eq.${uid}`);
+    if (error) {
+      console.error("Lỗi fetch disputes:", error.message);
+      return;
     }
 
-    const { data, error } = await query.order("created_at", { ascending: false });
+    if (data) {
+      // BẮT CHUẨN: Hễ uid hiện tại trùng với buyer_id HOẶC seller_id HOẶC seller_id trong tickets thì CHO HIỆN
+      const myDisputes = isAdmin
+        ? data
+        : data.filter((d: any) => {
+            const isMyBuyer = String(d.buyer_id) === String(uid);
+            const isMySeller = String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid);
+            return isMyBuyer || isMySeller;
+          });
 
-    if (!error && data) {
-      const mapped: Dispute[] = data.map((d: any) => ({
+      const mapped: Dispute[] = myDisputes.map((d: any) => ({
         id: String(d.id),
         ticketId: d.ticket_id,
         eventTitle: d.tickets?.event_name || "Vé Concert",
@@ -63,7 +75,10 @@ export default function DisputeCenter() {
         sellerResponse: d.seller_response,
         sellerVideo: d.seller_video,
         ruling: d.ruling,
+        buyerId: String(d.buyer_id),
+        sellerId: String(d.seller_id || d.tickets?.seller_id || ""),
       }));
+
       setDisputes(mapped);
     }
   };
@@ -145,7 +160,6 @@ export default function DisputeCenter() {
     try {
       setUploadingSeller(true);
 
-      // Upload video đối chất của Seller lên Storage
       const fileExt = sellerVideoFile.name.split('.').pop();
       const fileName = `seller_resp_${selectedDispute.id}_${Date.now()}.${fileExt}`;
 
@@ -175,14 +189,14 @@ export default function DisputeCenter() {
   return (
     <div className="max-w-[1680px] mx-auto px-5 py-8 space-y-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => nav(isSeller ? "seller-dash" : "my-tickets")} className="sp-btn-ghost text-xs px-3 py-1.5 cursor-pointer">
+        <button onClick={() => nav("seller-dash")} className="sp-btn-ghost text-xs px-3 py-1.5 cursor-pointer">
           ← Quay lại
         </button>
         <h1 className="font-display font-800 text-white text-2xl">Trung Tâm Xử Lý Tranh Chấp SafePass</h1>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Danh sách */}
+        {/* Danh sách bên trái */}
         <div className="space-y-3">
           {disputes.length === 0 ? (
             <div className="sp-card p-12 text-center text-gray-500 text-xs">Chưa có tranh chấp nào.</div>
@@ -205,7 +219,7 @@ export default function DisputeCenter() {
           )}
         </div>
 
-        {/* Chi tiết */}
+        {/* Chi tiết bên phải */}
         {selectedDispute ? (
           <div className="sp-card p-6 space-y-5">
             <h2 className="font-display font-800 text-white text-lg">Chi Tiết Tranh Chấp #{selectedDispute.id}</h2>
@@ -236,7 +250,7 @@ export default function DisputeCenter() {
             </div>
 
             {/* FORM NGƯỜI BÁN NỘP ĐỐI CHẤT */}
-            {isSeller && selectedDispute.status === "pending_seller" && (
+            {(String(selectedDispute.sellerId) === String(uid) || isAdmin) && selectedDispute.status === "pending_seller" && (
               <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl space-y-3">
                 <p className="font-bold text-purple-300 text-xs">📤 Người Bán Nộp Đối Chất (Hạn chót: Trước thời gian sự kiện)</p>
                 <textarea rows={3} value={sellerText} onChange={e => setSellerText(e.target.value)} placeholder="Nhập lý do đối chất..." className="sp-input" />
@@ -263,11 +277,11 @@ export default function DisputeCenter() {
             {/* PHÁN QUYẾT ADMIN */}
             {selectedDispute.ruling && (
               <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 leading-relaxed font-bold">
-                ⚖️ {selectedDispute.ruling}
+                ⚖️️ {selectedDispute.ruling}
               </div>
             )}
 
-            {/* CONTROL PANEL DÀNH CHO ADMIN */}
+            {/* BẢNG ĐIỀU KHIỂN ADMIN */}
             {isAdmin && (
               <div className="pt-4 border-t border-white/10 space-y-3">
                 <p className="font-bold text-amber-400 text-xs">⚖️ Bảng Điều Khiển Phán Quyết Admin:</p>
