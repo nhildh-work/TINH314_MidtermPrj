@@ -7,10 +7,11 @@ const fmt = (p: number) => p.toLocaleString("vi-VN") + " VND";
 
 // BẢNG CẤU HÌNH TRẠNG THÁI CHUẨN
 const STATUS_CFG = {
-  pending_deposit: { label: "⏳ CHỜ ĐÓNG CỌC", color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
-  available:       { label: "ĐANG BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
-  locked:          { label: "ĐANG GIAO DỊCH", color: "#FBBF24", bg: "rgba(251,191,36,0.1)" },
-  completed:       { label: "ĐÃ BÁN THÀNH CÔNG", color: "#60A5FA", bg: "rgba(96,165,250,0.1)" },
+  pending_deposit: { label: "⏳ CHỜ ĐÓNG CỌC (25%)", color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
+  available:       { label: "🟢 ĐANG MỞ BÁN", color: "#A3E635", bg: "rgba(163,230,53,0.1)" },
+  sold:            { label: "🔒 ĐÃ BÁN (ĐÓNG BẰNG ESCROW)", color: "#FBBF24", bg: "rgba(251,191,36,0.15)" },
+  locked:          { label: "🔒 ĐÃ BÁN (ĐÓNG BẰNG ESCROW)", color: "#FBBF24", bg: "rgba(251,191,36,0.15)" },
+  completed:       { label: "✅ HOÀN THÀNH (ĐÃ GIẢI NGÂN)", color: "#34D399", bg: "rgba(52,211,153,0.15)" },
   disputed:        { label: "🚨 TRANH CHẤP (ĐÃ KHÓA TIỀN VÉ NÀY)", color: "#F87171", bg: "rgba(248,113,113,0.15)" },
 } as const;
 
@@ -366,7 +367,15 @@ export default function SellerDash() {
             eventTitle: t.event_name,
             tier: t.tier || "Standard",
             price: Number(t.price),
-            status: t.status === "pending_deposit" ? "pending_deposit" : t.status === "disputed" ? "disputed" : t.status === "sold" ? "completed" : t.status === "locked" ? "locked" : "available",
+            status: t.status === "pending_deposit"
+              ? "pending_deposit"
+              : t.status === "disputed"
+              ? "disputed"
+              : t.status === "completed"
+              ? "completed"
+              : t.status === "sold" || t.status === "locked"
+              ? "locked"
+              : "available",
             date: t.event_date || "Sắp diễn ra",
           }));
           setSellerTickets(mapped);
@@ -375,9 +384,14 @@ export default function SellerDash() {
         const { data: disData } = await supabase
           .from("disputes")
           .select("*, tickets(*)")
-          .eq("seller_id", uid);
+          .order("created_at", { ascending: false });
 
-        if (disData) setSellerDisputes(disData);
+        if (disData) {
+          const sellerDisputesFiltered = disData.filter((d: any) =>
+            String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid)
+          );
+          setSellerDisputes(sellerDisputesFiltered);
+        }
       } catch (err) {
         console.error("Lỗi khi tải dữ liệu người bán:", err);
       }
@@ -469,14 +483,24 @@ export default function SellerDash() {
     );
   }
 
-  // THỐNG KÊ (Chỉ đếm vé available là đang mở bán)
+  // THỐNG KÊ ESCROW CHUẨN XÁC:
   const activeCount = allSellerListings.filter(l => l.status === "available").length;
-  const soldListings = allSellerListings.filter(l => l.status === "completed");
-  const availableBalance = soldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
+
+  // Vé ĐÃ CÓ NGƯỜI MUA nhưng KHÁCH CHƯA DÙNG (Đang đóng băng tiền Escrow chờ đi xem)
+  const pendingSoldListings = allSellerListings.filter(l => l.status === "locked");
+  const frozenEscrowBalance = pendingSoldListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
+
+  // CHỈ VÉ ĐÃ HOÀN THÀNH (Khách đã vào cổng/dùng vé xong) MỚI ĐƯỢC GIẢI NGÂN VÀO SỐ DƯ RÚT TIỀN!
+  const completedListings = allSellerListings.filter(l => l.status === "completed");
+  const completedBalance = completedListings.reduce((sum, l) => sum + Math.round(l.price * 0.95 + l.price * 0.25), 0);
+
+  // Số dư chính thức có thể rút về Ngân hàng
+  const availableBalance = Number((currentProfile as any)?.balance || 0) + completedBalance;
 
   const STATS = [
     { label: "Tổng số vé niêm yết", value: String(allSellerListings.length), icon: "🎟️", color: "#8B5CF6" },
     { label: "Đang mở bán", value: String(activeCount), icon: "🟢", color: "#A3E635" },
+    { label: "Tiền đang đóng băng Escrow (Chờ đi xem)", value: fmt(frozenEscrowBalance), icon: "🔒", color: "#FBBF24" },
     { label: "Số dư khả dụng để rút", value: fmt(availableBalance), icon: "💰", color: "#10B981" },
   ];
 

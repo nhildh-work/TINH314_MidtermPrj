@@ -9,7 +9,7 @@ export type View =
   | "dispute"
   | "dispute-center";
 
-export type Role = "buyer" | "seller";
+export type Role = "buyer" | "seller" | "admin";
 export type KycStatus = "none" | "step1" | "liveness" | "pending" | "approved";
 
 export interface TierData {
@@ -51,6 +51,8 @@ export interface TicketListing {
   sellerReviews: number;
   verified: boolean;
   minimapUrl?: string;
+  venue?: string;
+  isDeposit?: boolean;
 }
 
 export interface MyTicket {
@@ -61,7 +63,9 @@ export interface MyTicket {
   date: string;
   venue: string;
   price: number;
-  status: "locked" | "available" | "completed" | "dispute";
+  status: "locked" | "available" | "completed" | "dispute" | "paid";
+  sellerId?: string;
+  seller_id?: string;
 }
 
 export interface MyListing {
@@ -69,7 +73,7 @@ export interface MyListing {
   eventTitle: string;
   tier: string;
   price: number;
-  status: "available" | "locked" | "completed";
+  status: "available" | "locked" | "completed" | "pending_deposit" | "disputed";
   date: string;
 }
 

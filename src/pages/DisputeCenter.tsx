@@ -30,6 +30,9 @@ export default function DisputeCenter() {
   const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
   const isSeller = role === "seller";
 
+  const { currentProfile } = useApp();
+  const uid = currentUser?.id || currentProfile?.id;
+
   const fetchDisputes = async () => {
     const { data } = await supabase
       .from("disputes")
@@ -37,7 +40,17 @@ export default function DisputeCenter() {
       .order("created_at", { ascending: false });
 
     if (data) {
-      const mapped: Dispute[] = data.map((d: any) => ({
+      const filteredData = data.filter((d: any) => {
+        if (isAdmin) return true; // Admin thấy toàn bộ
+        if (isSeller) {
+          // Người bán thấy tranh chấp liên quan tới các vé của họ
+          return String(d.seller_id) === String(uid) || String(d.tickets?.seller_id) === String(uid);
+        }
+        // Người mua thấy các khiếu nại do chính họ báo cáo
+        return String(d.buyer_id) === String(uid);
+      });
+
+      const mapped: Dispute[] = filteredData.map((d: any) => ({
         id: String(d.id),
         ticketId: d.ticket_id,
         eventTitle: d.tickets?.event_name || "Vé Concert",
@@ -122,7 +135,7 @@ export default function DisputeCenter() {
     const now = new Date().getTime();
     const eventTime = new Date(selectedDispute.eventStartTime).getTime();
 
-    // QUÁ GIỜ BẮT ĐẦU SỰ KIỆN: TỰ ĐỘNG XỬ THUA VÀ TƯỚC QUYỀN KHÁNG CÁO
+    // QUÁ GIỜ BẮT ĐẦU SỰ KIỆN: TỰ ĐỘNG XỬ THUẢ VÀ TƯỚC QUYỀN KHÁNG CÁO
     if (now >= eventTime) {
       alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
 

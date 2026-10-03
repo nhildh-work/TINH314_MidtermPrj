@@ -96,6 +96,8 @@ export default function MyTickets() {
             })
             .map((t: any) => ({
               id: Number(t.tickets.id),
+              sellerId: t.tickets.seller_id,
+              seller_id: t.tickets.seller_id,
               eventTitle: t.tickets.event_name,
               eventImage: t.tickets.event_image || "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&h=400&fit=crop&auto=format",
               tier: t.tickets.tier || "Standard",
