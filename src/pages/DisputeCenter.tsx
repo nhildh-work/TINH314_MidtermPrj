@@ -18,7 +18,8 @@ interface Dispute {
   refundAccountHolder?: string;
   sellerResponse?: string;
   sellerVideo?: string;
-  ruling?: string;
+  resolution_notes?: string;
+  penalty_option?: string;
   buyerId: string;
   sellerId: string;
 }
@@ -30,6 +31,7 @@ export default function DisputeCenter() {
   const [sellerText, setSellerText] = useState("");
   const [sellerVideoFile, setSellerVideoFile] = useState<File | null>(null);
   const [uploadingSeller, setUploadingSeller] = useState(false);
+  const [adminPenalty, setAdminPenalty] = useState("buyer_win_no_penalty");
 
   const uid = currentUser?.id || currentProfile?.id;
   const isAdmin = role === "admin" || currentUser?.email === "admin@safepass.vn";
@@ -57,14 +59,15 @@ export default function DisputeCenter() {
         status: d.status,
         buyerReason: d.reason,
         buyerDetail: d.description || d.reason,
-        buyerVideo: d.evidence_url, // FIX: video_url -> evidence_url
+        buyerVideo: d.evidence_url,
         createdAt: d.created_at,
         refundBankName: d.refund_bank_name,
         refundBankAccount: d.refund_bank_account,
         refundAccountHolder: d.refund_account_holder,
-        sellerResponse: d.seller_response, // LƯU Ý BÊN DƯỚI
-        sellerVideo: d.seller_evidence_url, // FIX: seller_video -> seller_evidence_url
-        ruling: d.resolution_notes, // FIX: ruling -> resolution_notes
+        sellerResponse: d.seller_response,
+        sellerVideo: d.seller_evidence_url,
+        resolution_notes: d.resolution_notes,
+        penalty_option: d.penalty_option,
         buyerId: String(d.buyer_id),
         sellerId: String(d.seller_id), 
       }));
@@ -85,40 +88,40 @@ export default function DisputeCenter() {
     };
   }, [uid]);
 
-  const handleAdminRuling = async (winner: "buyer" | "seller") => {
+  const handleAdminRuling = async () => {
     if (!selectedDispute) return;
-
-    const claimTime = new Date(selectedDispute.createdAt).getTime();
-    const eventTime = new Date(selectedDispute.eventStartTime).getTime();
-    const diffHours = (eventTime - claimTime) / (1000 * 60 * 60);
 
     let rulingMessage = "";
     let finalStatus = "";
+    
+    const ticketPrice = selectedDispute.amount;
+    const penaltyAmount = ticketPrice * 0.05; 
+    const totalBuyerReceivesWithPenalty = ticketPrice + penaltyAmount;
 
-    if (winner === "buyer") {
-      if (diffHours >= 2) {
-        rulingMessage = `PHÁN QUYẾT ADMIN: Người Mua thắng án (Khiếu nại trước giờ G > 2 tiếng). Hoàn trả 100% tiền vé (${selectedDispute.amount.toLocaleString()} VND) cho Người Mua. Giải ngân lại cọc cho Người Bán.`;
-        finalStatus = "ruled_buyer_100";
-      } else {
-        const bonusAmount = selectedDispute.amount * 1.05;
-        rulingMessage = `PHÁN QUYẾT ADMIN: Người Mua thắng án (Khiếu nại khẩn cấp sát giờ diễn < 2 tiếng). Bồi thường 105% giá vé (${bonusAmount.toLocaleString()} VND - Phạt 5% cấn trừ trực tiếp tiền cọc Người Bán).`;
-        finalStatus = "ruled_buyer_105";
-      }
+    if (adminPenalty === "buyer_win_no_penalty") {
+      rulingMessage = `PHÁN QUYẾT: NGƯỜI MUA THẮNG (Lỗi Nhẹ). Hoàn 100% tiền vé (${ticketPrice.toLocaleString()} VND) cho Người Mua. Trả cọc cho Người Bán.`;
+      finalStatus = "ruled_buyer_100";
       await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
-    } else {
-      rulingMessage = `PHÁN QUYẾT ADMIN: Người Bán thắng án (Bằng chứng vé gốc hợp lệ). Giải ngân 100% tiền bán vé + 25% tiền cọc cho Người Bán.`;
+
+    } else if (adminPenalty === "buyer_win_penalty") {
+      rulingMessage = `PHÁN QUYẾT: NGƯỜI MUA THẮNG (Lỗi Nặng). Hoàn vé + Bồi thường 5% tổng cộng (${totalBuyerReceivesWithPenalty.toLocaleString()} VND). Phạt cấn trừ trực tiếp vào cọc của Người Bán.`;
+      finalStatus = "ruled_buyer_105";
+      await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
+
+    } else if (adminPenalty === "seller_win") {
+      rulingMessage = `PHÁN QUYẾT: NGƯỜI BÁN THẮNG. Bằng chứng hợp lệ. Giải ngân 100% tiền vé + hoàn lại 25% cọc cho Người Bán.`;
       finalStatus = "ruled_seller";
       await supabase.from("tickets").update({ status: "completed" }).eq("id", selectedDispute.ticketId);
     }
 
-    // FIX: Sử dụng đúng cột resolution_notes và resolved_at
     await supabase.from("disputes").update({ 
       resolution_notes: rulingMessage, 
+      penalty_option: adminPenalty,
       status: finalStatus,
       resolved_at: new Date().toISOString()
     }).eq("id", selectedDispute.id);
     
-    alert("Đã ban hành phán quyết thành công!");
+    alert("Đã ban hành phán quyết và áp dụng chính sách phạt thành công!");
     fetchDisputes();
     setSelectedDispute(null);
   };
@@ -133,7 +136,7 @@ export default function DisputeCenter() {
       alert("❌ Đã quá thời gian bắt đầu sự kiện! Bạn đã mất quyền đối chất và tự động bị xử thua.");
       await supabase.from("disputes").update({
         status: "final_buyer_autoloss",
-        resolution_notes: "TỰ ĐỘNG XỬ THUA: Người Bán không nộp đối chất trước thời gian sự kiện bắt đầu. Người Mua thắng 100% & Người Bán không được quyền kháng cáo.",
+        resolution_notes: "TỰ ĐỘNG XỬ THUA: Người Bán không nộp đối chất trước thời gian sự kiện. Hoàn 100% tiền vé cho Người mua.",
         resolved_at: new Date().toISOString()
       }).eq("id", selectedDispute.id);
       await supabase.from("tickets").update({ status: "refunded" }).eq("id", selectedDispute.ticketId);
@@ -143,7 +146,6 @@ export default function DisputeCenter() {
 
     try {
       setUploadingSeller(true);
-
       const fileExt = sellerVideoFile.name.split('.').pop();
       const fileName = `seller_resp_${selectedDispute.id}_${Date.now()}.${fileExt}`;
 
@@ -158,9 +160,8 @@ export default function DisputeCenter() {
 
       const { data: pubUrl } = supabase.storage.from('dispute-videos').getPublicUrl(fileName);
 
-      // FIX: Cập nhật đúng cột DB seller_evidence_url
       await supabase.from("disputes").update({
-        seller_response: sellerText, // Xem ghi chú bên dưới
+        seller_response: sellerText, 
         seller_evidence_url: pubUrl.publicUrl, 
         status: "under_review",
       }).eq("id", selectedDispute.id);
@@ -174,7 +175,6 @@ export default function DisputeCenter() {
     }
   };
 
-  // Phía dưới giao diện UI được giữ nguyên...
   return (
     <div className="max-w-[1680px] mx-auto px-5 py-8 space-y-6">
       <div className="flex items-center gap-3">
@@ -227,12 +227,6 @@ export default function DisputeCenter() {
                   )}
                 </div>
               )}
-
-              {selectedDispute.refundBankAccount && (
-                <p className="text-purple-300 pt-2 border-t border-white/5 font-mono">
-                  🏦 TK Nhận Hoàn Tiền: {selectedDispute.refundBankName} - {selectedDispute.refundBankAccount} ({selectedDispute.refundAccountHolder})
-                </p>
-              )}
             </div>
 
             {(String(selectedDispute.sellerId) === String(uid) || isAdmin) && selectedDispute.status === "pending_seller" && (
@@ -258,29 +252,35 @@ export default function DisputeCenter() {
               </div>
             )}
 
-            {selectedDispute.ruling && (
+            {selectedDispute.resolution_notes && (
               <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 leading-relaxed font-bold">
-                ⚖️ {selectedDispute.ruling}
+                ⚖️ {selectedDispute.resolution_notes}
               </div>
             )}
 
-            {isAdmin && (
-              <div className="pt-4 border-t border-white/10 space-y-3">
-                <p className="font-bold text-amber-400 text-xs">⚖️ Bảng Điều Khiển Phán Quyết Admin:</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => handleAdminRuling("buyer")}
-                    className="py-3 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl cursor-pointer"
+            {isAdmin && selectedDispute.status !== "ruled_buyer_100" && selectedDispute.status !== "ruled_buyer_105" && selectedDispute.status !== "ruled_seller" && (
+              <div className="pt-4 border-t border-white/10 space-y-4">
+                <p className="font-bold text-amber-400 text-xs">⚖️ Bảng Điều Khiển Phán Quyết (Admin):</p>
+                
+                <div>
+                  <label className="sp-filter-label mb-2 block">Chọn mức độ xử phạt Escrow:</label>
+                  <select 
+                    value={adminPenalty} 
+                    onChange={(e) => setAdminPenalty(e.target.value)} 
+                    className="sp-select w-full p-2 bg-gray-800 text-white rounded border border-gray-600"
                   >
-                    ✅ Xử NGƯỜI MUA Thắng
-                  </button>
-                  <button
-                    onClick={() => handleAdminRuling("seller")}
-                    className="py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl cursor-pointer"
-                  >
-                    ✅ Xử NGƯỜI BÁN Thắng
-                  </button>
+                    <option value="buyer_win_no_penalty">1. Người Mua thắng (Hoàn 100% vé - Trả cọc cho Người Bán)</option>
+                    <option value="buyer_win_penalty">2. Người Mua thắng (Hoàn vé + Bồi thường 5% từ cọc Người Bán)</option>
+                    <option value="seller_win">3. Người Bán thắng (Giải ngân tiền vé + Hoàn 25% cọc)</option>
+                  </select>
                 </div>
+
+                <button
+                  onClick={handleAdminRuling}
+                  className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-display font-800 text-sm rounded-xl cursor-pointer transition-all"
+                >
+                  XÁC NHẬN PHÁN QUYẾT TỪ ADMIN
+                </button>
               </div>
             )}
           </div>
